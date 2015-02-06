@@ -1,0 +1,24 @@
+{
+  "name": "nodium-neo4j",
+  "version": "1.0.0",
+  "description": "The Neo4j adapter extension for Nodium",
+  "main": "js/nodium-neo4j.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nodium/neo4j.git"
+  },
+  "keywords": [
+    "nodium",
+    "neo4j",
+    "adapter"
+  ],
+  "author": "",
+  "license": "Apache",
+  "bugs": {
+    "url": "https://github.com/nodium/neo4j/issues"
+  },
+  "homepage": "https://github.com/nodium/neo4j"
+}
