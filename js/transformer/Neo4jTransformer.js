@@ -1,20 +1,33 @@
-module.exports = function (nodium, $, undefined) {
+/**
+ * This file is part of the Nodium Neo4j package
+ *
+ * (c) Niko van Meurs & Sid Mijnders
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
+/**
+ * @author Niko van Meurs <nikovanmeurs@gmail.com>
+ * @author Sid Mijnders
+ */
+module.exports = function (Nodium, $, undefined) {
 
     'use strict';
 
-    var nodium      = nodium,
-        model       = nodium.model,
-        transformer = nodium.transformer;
+    var Nodium      = Nodium,
+        model       = Nodium.model,
+        transformer = Nodium.transformer;
 
     /**
      * An interface between the Neo4j data structure and the data structure
      * used by this framework
      */
-    transformer.Neo4jTransformer = nodium.createClass(transformer.AbstractDataTransformer, {
+    transformer.Neo4jTransformer = Nodium.createClass(transformer.AbstractDataTransformer, {
 
         construct: function () {
 
-            // transformer should only be instantiated once per nodium
+            // transformer should only be instantiated once per Nodium
             transformer.neo4j = this;
         },
 
@@ -61,7 +74,7 @@ module.exports = function (nodium, $, undefined) {
                     continue;
                 }
 
-                // split data properties from mnodiumed nodium properties
+                // split data properties from mNodiumed Nodium properties
                 for (var j in nodeData.data) {
                     if (map.hasOwnProperty(j)) {
                         mappedProperties[map[j]] = nodeData.data[j];

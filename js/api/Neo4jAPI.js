@@ -1,12 +1,25 @@
-module.exports = function (nodium, $, undefined) {
+/**
+ * This file is part of the Nodium Neo4j package
+ *
+ * (c) Niko van Meurs & Sid Mijnders
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
+/**
+ * @author Niko van Meurs <nikovanmeurs@gmail.com>
+ * @author Sid Mijnders
+ */
+module.exports = function (Nodium, $, undefined) {
 
     'use strict';
 
-    var graph       = nodium.graph,
-        model       = nodium.model,
-        transformer = nodium.transformer,
-        NodeEvent   = nodium.event.NodeEvent,
-        EdgeEvent   = nodium.event.EdgeEvent,
+    var graph       = Nodium.graph,
+        model       = Nodium.model,
+        transformer = Nodium.transformer,
+        NodeEvent   = Nodium.event.NodeEvent,
+        EdgeEvent   = Nodium.event.EdgeEvent,
         _defaults   = {
             host: 'localhost',
             port: 7474,
@@ -14,7 +27,7 @@ module.exports = function (nodium, $, undefined) {
         },
         self;
 
-    graph.Neo4jAPI = nodium.createClass({
+    graph.Neo4jAPI = Nodium.createClass({
 
         construct: function (options) {
 
@@ -23,11 +36,22 @@ module.exports = function (nodium, $, undefined) {
             self = this;
         },
 
-        url: function (path) {
-            var url = 'http://' + this.options.host;
+        /**
+         * Constructs a url with optional path
+         * @param {String} path
+         * @returns {String}
+         *
+         * @author Niko van Meurs <nikovanmeurs@gmail.com>
+         */
+        createUrl: function (path) {
 
-            if (this.options.port) {
-                url += ':' + this.options.port;
+            var options = this.options,
+                host    = options.host,
+                port    = options.port,
+                url     = 'http://' + this.options.host;
+
+            if (port) {
+                url += ':' + port;
             }
 
             if (path) {
@@ -45,7 +69,7 @@ module.exports = function (nodium, $, undefined) {
                 path += '/' + id;
             }
 
-            return this.url(path);
+            return this.createUrl(path);
         },
 
         edgeUrl: function (id) {
@@ -56,11 +80,11 @@ module.exports = function (nodium, $, undefined) {
                 path += '/' + id;
             }
 
-            return this.url(path);
+            return this.createUrl(path);
         },
 
         cypherUrl: function () {
-            return this.url('/db/data/cypher');
+            return this.createUrl('/db/data/cypher');
         },
 
         initialize: function () {

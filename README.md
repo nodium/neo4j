@@ -1,2 +1,2 @@
 # neo4j
-Contains the Nodium Neo4j adapter and API
+Contains the Nodium Neo4j API and data transformer

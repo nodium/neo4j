@@ -1,7 +1,20 @@
-module.exports = function (nodium) {
+/**
+ * This file is part of the Nodium Neo4j package
+ *
+ * (c) Niko van Meurs & Sid Mijnders
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
 
-    var jQuery = require('jquery');
+/**
+ * @author Niko van Meurs <nikovanmeurs@gmail.com>
+ */
+module.exports = function (Nodium) {
 
-    require('./api/Neo4jAPI')(nodium, jQuery);
-    require('./transformer/Neo4jTransformer')(nodium, jQuery);
+    var jQuery = Nodium.context.jQuery;
+
+    // Augment Nodium with the classes in the Neo4j package
+    require('./api/Neo4jAPI')(Nodium, jQuery);
+    require('./transformer/Neo4jTransformer')(Nodium, jQuery);
 }
