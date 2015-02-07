@@ -15,7 +15,7 @@ module.exports = function (Nodium, $, undefined) {
 
     'use strict';
 
-    var graph       = Nodium.graph,
+    var api         = Nodium.api,
         model       = Nodium.model,
         transformer = Nodium.transformer,
         NodeEvent   = Nodium.event.NodeEvent,
@@ -23,11 +23,11 @@ module.exports = function (Nodium, $, undefined) {
         _defaults   = {
             host: 'localhost',
             port: 7474,
-            version: 2,
+            version: 2
         },
         _options;
 
-    graph.Neo4jAPI = Nodium.createClass({
+    api.Neo4jAPI = Nodium.createClass({
 
         /**
          * Initializes options object
@@ -146,7 +146,7 @@ module.exports = function (Nodium, $, undefined) {
             payload = {
                 query: query,
                 params: {}
-            }
+            };
 
             $.post(url, payload);
         },
@@ -168,7 +168,7 @@ module.exports = function (Nodium, $, undefined) {
                     type: edgeData.type
                 };
 
-                url     = createNodeUrl(edgeData.from._id) + '/relationships',
+                url     = createNodeUrl(edgeData.from._id) + '/relationships';
 
                 $.post(url, payload)
                     .done(function (result) {
@@ -203,8 +203,8 @@ module.exports = function (Nodium, $, undefined) {
             var payload,
                 url;
 
-                payload = transformer.neo4j.toNode(nodeData);
-                url     = createNodeUrl(nodeData._id) + '/properties';
+            payload = transformer.neo4j.toNode(nodeData);
+            url     = createNodeUrl(nodeData._id) + '/properties';
 
             $.ajax({
                 url: url,
@@ -219,6 +219,8 @@ module.exports = function (Nodium, $, undefined) {
          */
         updateNodeLabel: function (nodeData) {
 
+            var url;
+
             if (1 === _options.version) {
                 return;
             }
@@ -231,7 +233,7 @@ module.exports = function (Nodium, $, undefined) {
             console.log("api: handling node label update");
             console.log(nodeData._id);
 
-            var url = createNodeUrl(nodeData._id) + '/labels';
+            url = createNodeUrl(nodeData._id) + '/labels';
 
             $.ajax({
                 url: url,
@@ -249,7 +251,7 @@ module.exports = function (Nodium, $, undefined) {
      *
      * @author Niko van Meurs <nikovanmeurs@gmail.com>
      */
-    createUrl: function (path) {
+    function createUrl (path) {
 
         var options = _options,
             host    = options.host,
@@ -271,7 +273,8 @@ module.exports = function (Nodium, $, undefined) {
      * Constructs a url to execute a Cypher query
      * @returns {String}
      */
-    createCypherUrl: function () {
+    function createCypherUrl () {
+
         return createUrl('/db/data/cypher');
     }    
 
@@ -280,7 +283,7 @@ module.exports = function (Nodium, $, undefined) {
      * @param {Number} [edgeId]
      * @returns {String}
      */
-    createEdgeUrl: function (edgeId) {
+    function createEdgeUrl (edgeId) {
 
         var path = '/db/data/relationship';
 
@@ -296,7 +299,7 @@ module.exports = function (Nodium, $, undefined) {
      * @param {Number} [nodeId]
      * @returns {String}
      */
-    createNodeUrl: function (nodeId) {
+    function createNodeUrl (nodeId) {
 
         var path = '/db/data/node';
 
