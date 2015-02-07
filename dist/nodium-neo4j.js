@@ -12,15 +12,13 @@
  * @author Niko van Meurs <nikovanmeurs@gmail.com>
  * @author Sid Mijnders
  */
- (function (context) {
+ (function (window, undefined) {
 
     'use strict';
 
-    var Nodium = context.Nodium;
-    // var Nodium = context.Nodium || require('nodium');
-        
-    require('./nodium-neo4j')(Nodium);
-}(this));
+    require('./nodium-neo4j')(window.Nodium);
+
+}(window));
 },{"./nodium-neo4j":3}],2:[function(require,module,exports){
 /**
  * This file is part of the Nodium Neo4j package

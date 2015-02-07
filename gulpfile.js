@@ -44,4 +44,4 @@ gulp.task('minify', function () {
             suffix: '.min'
         }))
         .pipe(gulp.dest('./dist'));
-})
+});
