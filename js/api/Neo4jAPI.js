@@ -25,132 +25,106 @@ module.exports = function (Nodium, $, undefined) {
             port: 7474,
             version: 2,
         },
-        self;
+        _options;
 
     graph.Neo4jAPI = Nodium.createClass({
 
+        /**
+         * Initializes options object
+         * @param {Object} [options]
+         */
         construct: function (options) {
 
-            this.options = $.extend({}, _defaults, options);
-
-            self = this;
+            _options = $.extend({}, _defaults, options);
         },
 
         /**
-         * Constructs a url with optional path
-         * @param {String} path
-         * @returns {String}
-         *
-         * @author Niko van Meurs <nikovanmeurs@gmail.com>
+         * Gets all nodes and edges
+         * @returns {Promise}
          */
-        createUrl: function (path) {
+        getGraph: function () {
 
-            var options = this.options,
-                host    = options.host,
-                port    = options.port,
-                url     = 'http://' + this.options.host;
+            return new Promise(function (resolve, reject) {
 
-            if (port) {
-                url += ':' + port;
-            }
+                var payload,
+                    query,
+                    url;
 
-            if (path) {
-                url += path;
-            }
+                if (1 === _options.version) {
 
-            return url;
-        },
+                    query = 'START n=node(*) RETURN n';
 
-        nodeUrl: function (id) {
+                } else {
 
-            var path = '/db/data/node';
+                    query = 'START n=node(*) RETURN n, labels(n)';
+                }
 
-            if (id) {
-                path += '/' + id;
-            }
+                payload = {
+                    query: query,
+                    params: {}
+                };
+                
+                url = createCypherUrl();
 
-            return this.createUrl(path);
-        },
+                // TODO use promises
+                $.post(url, payload)
+                    .done(function (nodeResult) {
 
-        edgeUrl: function (id) {
+                    var payload = {
+                        query: 'START r=relationship(*) RETURN r',
+                        params: {}
+                    };
 
-            var path = '/db/data/relationship';
+                    $.post(url, payload)
+                        .done(function (edgeResult) {
 
-            if (id) {
-                path += '/' + id;
-            }
+                        var graph = transformer.neo4j.from(nodeResult, edgeResult);
 
-            return this.createUrl(path);
-        },
-
-        cypherUrl: function () {
-            return this.createUrl('/db/data/cypher');
-        },
-
-        initialize: function () {
-            $(this.kernel).on(NodeEvent.CREATED, this.handleNodeCreated.bind(this));
-            $(this.kernel).on(NodeEvent.DESTROYED, this.handleNodeDeleted.bind(this));
-            $(this.kernel).on(EdgeEvent.CREATED, this.handleEdgeCreated.bind(this));
-            $(this.kernel).on(EdgeEvent.DESTROYED, this.handleEdgeDeleted.bind(this));
-            $(this.kernel).on(NodeEvent.UPDATED, this.handleNodeUpdated.bind(this));
-            $(this.kernel).on(NodeEvent.UPDATED, this.handleNodeLabelUpdated.bind(this));
-        },
-
-        get: function (callback) {
-
-            var nodeQuery = {
-                // query: 'START n=node(*) RETURN n, labels(n)',
-                query: 'START n=node(*) RETURN n',
-                params: {}
-            };
-            var edgeQuery = {
-                query: 'START r=relationship(*) RETURN r',
-                params: {}
-            };
-            var url = this.cypherUrl();
-            var graph;
-
-            // TODO use promises
-            $.post(url, nodeQuery)
-             .done(function (nodeResult) {
-
-            $.post(url, edgeQuery)
-             .done(function (edgeResult) {
-
-                graph = transformer.neo4j.from(nodeResult, edgeResult);
-
-                callback(graph);
-             });
+                        resolve(graph);
+                     });
+                });
             });
         },
 
         /**
          * Create a node in the neo4j database
          * Store the id to easily delete the node later
+         * @param {Object} nodeData
+         * @returns {Promise}
          */
-        handleNodeCreated: function (event, node, data) {
+        createNode: function (nodeData) {
 
-            var url = this.nodeUrl(),
-                props = transformer.neo4j.toNode(data);
+            return new Promise(function (resolve, reject) {
 
-            $.ajax({
-                url: url,
-                data: props,
-                type: 'POST',
-                async: false
-            }).done(function (result) {
-                data._id = transformer.neo4j.idFromSelf(result.self);
+                var payload,
+                    url;
+                    
+                payload = transformer.neo4j.toNode(nodeData);
+                url     = createNodeUrl();
+
+                $.ajax({
+                    url: url,
+                    data: payload,
+                    type: 'POST',
+                    async: false // It's inside a promise now, so async false doesn't really do much
+                }).done(function (result) {
+
+                    var id = transformer.neo4j.idFromSelf(result.self);
+                    resolve(id);
+                });
             });
         },
 
         /**
-         * We're doing this with a cypher, because we also have to delete
-         * all relationships
+         * We're doing this with a cypher,
+         * because we also have to delete all relationships
+         * @param {Object} nodeData
          */
-        handleNodeDeleted: function (event, data) {
+        deleteNode: function (nodeData) {
 
-            var query,
-                url = this.cypherUrl();
+            var payload,
+                query,
+                url = createCypherUrl();
 
             // TODO this query should work, but can't find parameter nodeId
             // query = {
@@ -159,32 +133,60 @@ module.exports = function (Nodium, $, undefined) {
             //          "nodeId": nodeId
             //  }
             // };
-            query = {
-                "query" : "START n=node("+data._id+") OPTIONAL MATCH n-[r]-() DELETE n,r",
-                // "query" : "START n=node("+data._id+") MATCH n-[r?]-() DELETE n,r",
-                "params" : {}
-            };
 
-            $.post(url, query);
+            if (1 === _options.version) {
+
+                query = "START n=node(" + nodeData._id + ") MATCH n-[r?]-() DELETE n,r";
+
+            } else {
+
+                query = "START n=node(" + nodeData._id + ") OPTIONAL MATCH n-[r]-() DELETE n,r";
+            }
+
+            payload = {
+                query: query,
+                params: {}
+            }
+
+            $.post(url, payload);
         },
 
-        handleEdgeCreated: function (event, data, source, target) {
+        /**
+         * Creates a new edge in Neo4j
+         * @param {Object} edgeData
+         * @returns {Promise}
+         */
+        createEdge: function (edgeData) {
 
-            var url = this.nodeUrl(source._id) + '/relationships',
-                props = {
-                    to: this.edgeUrl(target._id),
-                    type: data.type
+            return new Promise(function (resolve, reject) {
+
+                var payload,
+                    url;
+
+                payload = {
+                    to: createEdgeUrl(edgeData.to._id),
+                    type: edgeData.type
                 };
 
-            $.post(url, props)
-             .done(function (result) {
-                data._id = transformer.neo4j.idFromSelf(result.self);
-             });
+                url     = createNodeUrl(edgeData.from._id) + '/relationships',
+
+                $.post(url, payload)
+                    .done(function (result) {
+
+                    var id = transformer.neo4j.idFromSelf(result.self);
+
+                    resolve(id);
+                 });
+            });
         },
 
-        handleEdgeDeleted: function (event, data) {
+        /**
+         * Deletes an edge in the Neo4j database
+         * @param {Object} edgeData
+         */
+        deleteEdge: function (edgeData) {
 
-            var url = this.edgeUrl(data._id);
+            var url = createEdgeUrl(edgeData._id);
 
             $.ajax({
                 url: url,
@@ -192,33 +194,34 @@ module.exports = function (Nodium, $, undefined) {
             });
         },
 
-        handleNodeUpdated: function (event, node, data, update) {
+        /**
+         * Updates a node in the Neo4j database
+         * @param {Object} nodeData
+         */
+        updateNode: function (nodeData) {
 
-            // check if a property was updated
-            if (!update.changed(model.Node.getPropertiesPath()) &&
-                !update.changed('_style')) {
-                
-                return;
-            }
+            var payload,
+                url;
 
-            console.log("api: handling node update");
-            console.log(data._id);
-
-            var obj = transformer.neo4j.toNode(data),
-                url = this.nodeUrl(data._id) + '/properties';
+                payload = transformer.neo4j.toNode(nodeData);
+                url     = createNodeUrl(nodeData._id) + '/properties';
 
             $.ajax({
                 url: url,
                 type: 'PUT',
-                data: obj
+                data: payload
             });
         },
 
         /**
          * Removes all labels from the node and replaces them with the ones in data
-         * @param data string or array<string>
+         * @param {String|Array<String>} data
          */
-        handleNodeLabelUpdated: function (event, node, data, update) {
+        updateNodeLabel: function (nodeData) {
+
+            if (1 === _options.version) {
+                return;
+            }
 
             // check if a label was added or removed
             if (!update.changed(model.Node.getLabelsPath())) {
@@ -226,16 +229,81 @@ module.exports = function (Nodium, $, undefined) {
             }
 
             console.log("api: handling node label update");
-            console.log(data._id);
+            console.log(nodeData._id);
 
-            var url = this.nodeUrl(data._id) + '/labels';
+            var url = createNodeUrl(nodeData._id) + '/labels';
 
             $.ajax({
                 url: url,
                 type: 'PUT',
                 contentType: 'application/json',
-                data: JSON.stringify(data._labels)
+                data: JSON.stringify(nodeData._labels)
             });
         }
     });
+
+    /**
+     * Constructs a url with optional path
+     * @param {String} path
+     * @returns {String}
+     *
+     * @author Niko van Meurs <nikovanmeurs@gmail.com>
+     */
+    createUrl: function (path) {
+
+        var options = _options,
+            host    = options.host,
+            port    = options.port,
+            url     = 'http://' + host;
+
+        if (port) {
+            url += ':' + port;
+        }
+
+        if (path) {
+            url += path;
+        }
+
+        return url;
+    }
+
+    /**
+     * Constructs a url to execute a Cypher query
+     * @returns {String}
+     */
+    createCypherUrl: function () {
+        return createUrl('/db/data/cypher');
+    }    
+
+    /**
+     * Constructs a url to edit an edge
+     * @param {Number} [edgeId]
+     * @returns {String}
+     */
+    createEdgeUrl: function (edgeId) {
+
+        var path = '/db/data/relationship';
+
+        if (id) {
+            path += '/' + id;
+        }
+
+        return createUrl(path);
+    }
+
+    /**
+     * Constructs a url to edit a node
+     * @param {Number} [nodeId]
+     * @returns {String}
+     */
+    createNodeUrl: function (nodeId) {
+
+        var path = '/db/data/node';
+
+        if (id) {
+            path += '/' + nodeId;
+        }
+
+        return createUrl(path);
+    }
 };
