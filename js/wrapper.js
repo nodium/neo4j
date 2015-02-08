@@ -15,6 +15,9 @@
 
     'use strict';
 
-    require('./nodium-neo4j')(window.Nodium);
+    var Nodium = window.Nodium,
+    	jQuery = Nodium.context.jQuery;
+
+    require('./nodium-neo4j')(Nodium, jQuery);
 
 }(window));

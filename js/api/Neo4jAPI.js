@@ -230,9 +230,6 @@ module.exports = function (Nodium, $, undefined) {
                 return;
             }
 
-            console.log("api: handling node label update");
-            console.log(nodeData._id);
-
             url = createNodeUrl(nodeData._id) + '/labels';
 
             $.ajax({
@@ -287,7 +284,7 @@ module.exports = function (Nodium, $, undefined) {
 
         var path = '/db/data/relationship';
 
-        if (id) {
+        if (edgeId) {
             path += '/' + id;
         }
 
@@ -303,7 +300,7 @@ module.exports = function (Nodium, $, undefined) {
 
         var path = '/db/data/node';
 
-        if (id) {
+        if (nodeId) {
             path += '/' + nodeId;
         }
 

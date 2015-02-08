@@ -139,7 +139,7 @@ module.exports = function (Nodium, $, undefined) {
                 for (var i = 0; i < nodes.length; i++) {
                     node = nodes[i];
 
-                    mappedProperties = this.getmappedProperties(node);
+                    mappedProperties = this.getMappedProperties(node);
                     obj = $.extend({}, node._properties, mappedProperties);
 
                     neoNodes.push(obj);
@@ -164,5 +164,4 @@ module.exports = function (Nodium, $, undefined) {
             return this.to([node]).nodes[0];
         }
     });
-
 };

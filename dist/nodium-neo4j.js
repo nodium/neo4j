@@ -16,7 +16,10 @@
 
     'use strict';
 
-    require('./nodium-neo4j')(window.Nodium);
+    var Nodium = window.Nodium,
+    	jQuery = Nodium.context.jQuery;
+
+    require('./nodium-neo4j')(Nodium, jQuery);
 
 }(window));
 },{"./nodium-neo4j":3}],2:[function(require,module,exports){
@@ -116,6 +119,7 @@ module.exports = function (Nodium, $, undefined) {
          */
         createNode: function (nodeData) {
 
+            console.log('createNode');
             return new Promise(function (resolve, reject) {
 
                 var payload,
@@ -144,6 +148,7 @@ module.exports = function (Nodium, $, undefined) {
          */
         deleteNode: function (nodeData) {
 
+            console.log('deleteNode');
             var payload,
                 query,
                 url = createCypherUrl();
@@ -225,8 +230,13 @@ module.exports = function (Nodium, $, undefined) {
             var payload,
                 url;
 
+            console.log('updateNode');
+
             payload = transformer.neo4j.toNode(nodeData);
             url     = createNodeUrl(nodeData._id) + '/properties';
+
+            console.log(payload);
+            console.log(url);
 
             $.ajax({
                 url: url,
@@ -309,7 +319,7 @@ module.exports = function (Nodium, $, undefined) {
 
         var path = '/db/data/relationship';
 
-        if (id) {
+        if (edgeId) {
             path += '/' + id;
         }
 
@@ -325,7 +335,7 @@ module.exports = function (Nodium, $, undefined) {
 
         var path = '/db/data/node';
 
-        if (id) {
+        if (nodeId) {
             path += '/' + nodeId;
         }
 
@@ -497,7 +507,7 @@ module.exports = function (Nodium, $, undefined) {
                 for (var i = 0; i < nodes.length; i++) {
                     node = nodes[i];
 
-                    mappedProperties = this.getmappedProperties(node);
+                    mappedProperties = this.getMappedProperties(node);
                     obj = $.extend({}, node._properties, mappedProperties);
 
                     neoNodes.push(obj);
@@ -522,6 +532,6 @@ module.exports = function (Nodium, $, undefined) {
             return this.to([node]).nodes[0];
         }
     });
-
 };
+
 },{}]},{},[1]);
