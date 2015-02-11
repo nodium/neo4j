@@ -15,18 +15,17 @@
  * @author Niko van Meurs <nikovanmeurs@gmail.com>
  * @author Sid Mijnders
  */
-
 const
-    seraph = require('seraph'),
-    _      = require('lodash');
+    seraph            = require('seraph'),
+    _                 = require('lodash');
 
 module.exports = function (Nodium, undefined) {
 
     'use strict';
 
+    var SeraphTransformer = require('../transformer/SeraphTransformer')(Nodium);
+
     var api         = Nodium.api,
-        model       = Nodium.model,
-        transformer = Nodium.transformer,
         _defaults   = {
             host: 'localhost',
             port: 7474
@@ -38,10 +37,13 @@ module.exports = function (Nodium, undefined) {
          * Initializes options object
          * @param {Object} [options]
          */
-        construct: function (options) {
+        construct: function (options, transformer) {
 
             // create the database for this instance
             this._options = _.extend({}, _defaults, options);
+
+            // use the default seraph transformer if no transformer is injected
+            this.transformer = transformer || new SeraphTransformer();
 
             this.db = seraph(this.createUrl());
         },
@@ -71,45 +73,43 @@ module.exports = function (Nodium, undefined) {
 
         getEdges: function () {
 
-            return new Promise(function (resolve, reject) {
+            var cypher = 'START r=relationship(*) '
+                       + 'RETURN r';
 
-                var cypher = 'START r=relationship(*) '
-                           + 'RETURN r';
-
-                db.query(cypher, function (err, result) {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        resolve(result);
-                    }
-                });
-            });
+            return this
+                .promiseCypher(cypher)
+                .then(function (value) {
+                    return this.transformer.fromEdges(value);
+                }.bind(this));
         },
 
         /**
-         * Gets all nodes and edges
+         * Gets all nodes
          * @returns {Promise}
          */
-        getGraph: function () {
-
-            return Promise.all([this.getNodes(), this.getEdges()])
-                .then(function (values) {
-                    console.log('yaay');
-                    console.log(values);
-                })
-                .catch(function (reason) {
-                    console.log('naaay :(');
-                    console.log(reason);
-                });
-        },
-
         getNodes: function () {
 
+            var cypher = 'START n=node(*) '
+                       + 'RETURN n, labels(n)';
+
+            return this
+                .promiseCypher(cypher)
+                .then(function (value) {
+                    return this.transformer.fromNodes(value);
+                }.bind(this));
+        },
+
+        /**
+         * Function that wraps cypher calls in a Promise
+         *
+         * @param {String} cypher
+         * @returns {Promise}
+         */
+        promiseCypher: function (cypher) {
+
+            var db = this.db;
+
             return new Promise(function (resolve, reject) {
-
-                var cypher = 'START n=node(*) '
-                           + 'RETURN n, labels(n)';
-
                 db.query(cypher, function (err, result) {
                     if (err) {
                         reject(err);
@@ -120,4 +120,6 @@ module.exports = function (Nodium, undefined) {
             });
         }
     });
+
+    return api.SeraphAdapter;
 };

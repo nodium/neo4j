@@ -11,14 +11,9 @@
  * @author Niko van Meurs <nikovanmeurs@gmail.com>
  * @author Sid Mijnders
  */
-const
-    _      = require('lodash');
-
-module.exports = function (Nodium, undefined) {
+module.exports = function (Nodium, $, undefined) {
 
     'use strict';
-
-    var SeraphAdapter = require('../adapter/SeraphAdapter')(Nodium);
 
     var api         = Nodium.api,
         model       = Nodium.model,
@@ -29,7 +24,8 @@ module.exports = function (Nodium, undefined) {
             host: 'localhost',
             port: 7474,
             version: 2
-        };
+        },
+        _options;
 
     api.Neo4jAPI = Nodium.createClass({
 
@@ -37,12 +33,9 @@ module.exports = function (Nodium, undefined) {
          * Initializes options object
          * @param {Object} [options]
          */
-        construct: function (options, adapter) {
+        construct: function (options) {
 
-            this._options = _.extend({}, _defaults, options);
-
-            // seraph is the default adapter
-            this.adapter = adapter || new SeraphAdapter();
+            _options = $.extend({}, _defaults, options);
         },
 
         /**
@@ -51,65 +44,46 @@ module.exports = function (Nodium, undefined) {
          */
         getGraph: function () {
 
-            var adapter = this.adapter;
+            return new Promise(function (resolve, reject) {
 
-            // return Promise.all([
-            //     adapter.getNodes(),
-            //     adapter.getEdges()
-            // ]);
+                var payload,
+                    query,
+                    url;
 
-            // TODO find way to flatten stuff like this
-            return adapter.getNodes()
-                .then(function (nodes) {
-                    return adapter.getEdges()
-                        .then(function (edges) {
-                            return {
-                                nodes: nodes,
-                                edges: edges
-                            };
-                        });
-                });
+                if (1 === _options.version) {
 
-            // return new Promise(function (resolve, reject) {
+                    query = 'START n=node(*) RETURN n';
 
-            //     var payload,
-            //         query,
-            //         url;
+                } else {
 
-            //     if (1 === _options.version) {
+                    query = 'START n=node(*) RETURN n, labels(n)';
+                }
 
-            //         query = 'START n=node(*) RETURN n';
-
-            //     } else {
-
-            //         query = 'START n=node(*) RETURN n, labels(n)';
-            //     }
-
-            //     payload = {
-            //         query: query,
-            //         params: {}
-            //     };
+                payload = {
+                    query: query,
+                    params: {}
+                };
                 
-            //     url = createCypherUrl();
+                url = createCypherUrl();
 
-            //     // TODO use promises
-            //     $.post(url, payload)
-            //         .done(function (nodeResult) {
+                // TODO use promises
+                $.post(url, payload)
+                    .done(function (nodeResult) {
 
-            //         var payload = {
-            //             query: 'START r=relationship(*) RETURN r',
-            //             params: {}
-            //         };
+                    var payload = {
+                        query: 'START r=relationship(*) RETURN r',
+                        params: {}
+                    };
 
-            //         $.post(url, payload)
-            //             .done(function (edgeResult) {
+                    $.post(url, payload)
+                        .done(function (edgeResult) {
 
-            //             var graph = transformer.neo4j.from(nodeResult, edgeResult);
+                        var graph = transformer.neo4j.from(nodeResult, edgeResult);
 
-            //             resolve(graph);
-            //          });
-            //     });
-            // });
+                        resolve(graph);
+                     });
+                });
+            });
         },
 
         /**
@@ -332,7 +306,4 @@ module.exports = function (Nodium, undefined) {
 
         return createUrl(path);
     }
-
-
-    return api.Neo4jAPI;
 };

@@ -10,6 +10,8 @@
 /**
  * @author Niko van Meurs <nikovanmeurs@gmail.com>
  * @author Sid Mijnders
+ * 
+ * Transforms raw responses from the Neo4j REST API to Nodium objects
  */
 module.exports = function (Nodium, $, undefined) {
 
