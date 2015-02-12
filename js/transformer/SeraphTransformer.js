@@ -66,6 +66,7 @@ module.exports = function (Nodium, undefined) {
                 node = {
                     _data: seraphNode,
                     _id: _.uniqueId(),
+                    _labels: [],
                     _properties: parsedData.properties,
                 };
 
@@ -86,86 +87,37 @@ module.exports = function (Nodium, undefined) {
             return {
                 _data: seraphEdge,
                 _id: _.uniqueId(),
-                _properties: seraphEdge.properties,
+                _properties: seraphEdge.properties || {},
                 source: this.nodeIndexMap[seraphEdge.start],
                 target: this.nodeIndexMap[seraphEdge.end],
                 type: seraphEdge.type
             };
-        }
+        },
 
-        /**
-         * Transform data from neo4j
-         */
-        // from_old: function (neo4jNodes, neo4jEdges) {
+        toEdge: function (nodiumEdge) {
 
-        //     var nodes = [],
-        //         edges = [],
-        //         node, id, nodeData, nodeLabels,
-        //         nodeIndexMap = {}, nodeCount = 0,
-        //         edge,
-        //         properties,
-        //         map = this.options.map,
-        //         mappedProperties;
+            var edge = {
+                end: nodiumEdge._data.end,
+                id: nodiumEdge._data.id,
+                properties: nodiumEdge._properties || {},
+                start: nodiumEdge._data.start
+            };
 
-        //     for (var i = 0; i < neo4jNodes.data.length; i++) {
+            return edge;
+        },
 
-        //         properties = {};
-        //         mappedProperties = {};
+        toNode: function (nodiumNode) {
 
-        //         nodeData = neo4jNodes.data[i][0];
-        //         nodeLabels = neo4jNodes.data[i][1];
+            var mappedProperties = this.getMappedProperties(nodiumNode),
+                node = _.extend({}, nodiumNode._properties, mappedProperties);
 
-        //         if (!nodeData || nodeIndexMap[nodeData.self] !== undefined) {
-        //             continue;
-        //         }
+            // place back the neo4j id if it exists
+            if (nodiumNode.hasOwnProperty('_data')) {
+                node.id = nodiumNode._data.id;
+            }
 
-        //         // split data properties from mNodiumed Nodium properties
-        //         for (var j in nodeData.data) {
-        //             if (map.hasOwnProperty(j)) {
-        //                 mappedProperties[map[j]] = nodeData.data[j];
-        //             } else {
-        //                 properties[j] = nodeData.data[j];
-        //             }
-        //         }
-
-        //         nodeIndexMap[nodeData.self] = nodeCount;
-        //         nodeCount++;
-
-        //         node = model.Node.create(
-        //             properties,
-        //             nodeLabels,
-        //             this.idFromSelf(nodeData.self)
-        //         );
-
-        //         $.extend(node, mappedProperties);
-        //         nodes.push(node);
-        //     }
-
-        //     // convert the edges to an array of d3 edges,
-        //     // which have node indices as source and target
-        //     for (var i = 0; i < neo4jEdges.data.length; i++) {
-        //         edge = neo4jEdges.data[i][0];
-
-        //         if (!edge) {
-        //             continue;
-        //         }
-
-        //         edges.push({
-        //             _id: this.idFromSelf(edge.self),
-        //             source: nodeIndexMap[edge.start],
-        //             target: nodeIndexMap[edge.end],
-        //             type: edge.type
-        //         });
-        //     }
-
-        //     console.log("nodes");
-        //     console.log(nodes);
-
-        //     return {
-        //         nodes: nodes,
-        //         edges: edges
-        //     }
-        // },
+            return node;
+        },
 
         // /**
         //  * Transform data to neo4j nodes and edges

@@ -23,7 +23,9 @@ module.exports = function (Nodium, undefined) {
 
     'use strict';
 
-    var SeraphTransformer = require('../transformer/SeraphTransformer')(Nodium);
+    // var SeraphTransformer = require('../transformer/SeraphTransformer')(Nodium);
+    var SeraphNodeTransformer = require('../transformer/SeraphNodeTransformer')(Nodium);
+    var SeraphEdgeTransformer = require('../transformer/SeraphEdgeTransformer')(Nodium);
 
     var api         = Nodium.api,
         _defaults   = {
@@ -37,50 +39,103 @@ module.exports = function (Nodium, undefined) {
          * Initializes options object
          * @param {Object} [options]
          */
-        construct: function (options, transformer) {
+        construct: function (options, nodeTransformer, edgeTransformer) {
 
-            // create the database for this instance
             this._options = _.extend({}, _defaults, options);
 
-            // use the default seraph transformer if no transformer is injected
-            this.transformer = transformer || new SeraphTransformer();
+            // use the default seraph transformers if no transformers are injected
+            this.nodeTransformer = nodeTransformer || new SeraphNodeTransformer();
+            this.edgeTransformer = edgeTransformer || new SeraphEdgeTransformer();
 
-            this.db = seraph(this.createUrl());
+            this.db = seraph(createUrl.call(this));
+        },
+
+        call: function (path, method, data) {
+
+            var operation = this.db.operation(path, method, data);
+
+            return this.wrapPromise(this.db.call)(operation);
+        },
+
+        createEdge: function (edge) {
+
+            var payload = this.edgeTransformer.to(edge);
+
+            return this
+                .wrapPromise(this.db.relate)(
+                    payload.start,
+                    payload.type,
+                    payload.end,
+                    payload.properties
+                )
+                .then(function (seraphEdge) {
+                    edge._data = seraphEdge;
+                    return edge;
+                });
         },
 
         /**
-         * Constructs a url with optional path
-         * @param {String} path
-         * @returns {String}
+         * @param {Object} node
+         * @returns {Promise}
          */
-        createUrl: function (path) {
+        createNode: function (node) {
 
-            var options = this._options,
-                host    = options.host,
-                port    = options.port,
-                url     = 'http://' + host;
+            var payload = this.nodeTransformer.to(node);
 
-            if (port) {
-                url += ':' + port;
-            }
-
-            if (path) {
-                url += path;
-            }
-
-            return url;
+            return this
+                .wrapPromise(this.db.save)(payload)
+                .then(function (seraphNode) {
+                    node._data = seraphNode;
+                    return node;
+                });
         },
 
-        getEdges: function () {
+        deleteEdge: function (edge) {
+
+            var payload = this.edgeTransformer.to(edge);
+
+            return this
+                .wrapPromise(this.db.rel.delete)(payload)
+                .then(function () {
+                    return edge;
+                });
+        },
+
+        /**
+         * @param {Object} nodeData An object with the data of the node
+         * @returns {Promise} A promise with the data of the deleted node
+         */
+        deleteNode: function (node) {
+
+            var payload = this.nodeTransformer.to(node);
+
+            return this
+                .wrapPromise(this.db.delete)(payload, true)
+                .then(function () {
+                    return node;
+                });
+        },
+
+        getEdges: function (nodes) {
 
             var cypher = 'START r=relationship(*) '
                        + 'RETURN r';
 
+            // create a map from neo4j id to index used by nodium
+            var nodeMap = createNodeMap(nodes);
+
+            // prepare the transformer with the node map for all calls
+            var transformEdge = _.partialRight(
+                _.rearg(this.edgeTransformer.from, [0, 3, 1, 2]),
+                nodeMap
+            );
+
+            // prepare the map function so it executes when it has received two arguments
+            var transformEdges = _.curry(_.map, 2)(_, transformEdge);
+
             return this
                 .promiseCypher(cypher)
-                .then(function (value) {
-                    return this.transformer.fromEdges(value);
-                }.bind(this));
+                .then(transformEdges);
         },
 
         /**
@@ -92,11 +147,22 @@ module.exports = function (Nodium, undefined) {
             var cypher = 'START n=node(*) '
                        + 'RETURN n, labels(n)';
 
+            // TODO where to put this???
+            var transformNodeAndLabels = function (nodeAndLabels) {
+                var node = this.nodeTransformer.from(nodeAndLabels['n']),
+                    labels = nodeAndLabels['labels(n)'];
+
+                node._labels = labels;
+
+                return node;
+            }.bind(this);
+
+            // prepare the map function so it executes when it has received two arguments
+            var transformNodesAndLabels = _.curry(_.map, 2)(_, transformNodeAndLabels);
+
             return this
                 .promiseCypher(cypher)
-                .then(function (value) {
-                    return this.transformer.fromNodes(value);
-                }.bind(this));
+                .then(transformNodesAndLabels);
         },
 
         /**
@@ -107,19 +173,89 @@ module.exports = function (Nodium, undefined) {
          */
         promiseCypher: function (cypher) {
 
-            var db = this.db;
+            return this.wrapPromise(this.db.query)(cypher);
+        },
 
-            return new Promise(function (resolve, reject) {
-                db.query(cypher, function (err, result) {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        resolve(result);
-                    }
+        /**
+         * Same as create
+         */
+        updateNode: function (node) {
+
+            var payload = this.nodeTransformer.to(node);
+
+            return this
+                .wrapPromise(this.db.save)(payload)
+                .then(function (seraphNode) {
+                    node._data = seraphNode;
+                    return node;
                 });
-            });
+        },
+
+        wrapPromise: function (fn) {
+
+            return function () {
+
+                var args = arguments;
+
+                return new Promise(function (resolve, reject) {
+
+                    var curried = _.partialRight(fn, function (err, result) {
+                        if (err) {
+                            reject(err);
+                        } else {
+                            resolve(result);
+                        }
+                    }).apply(this, args);
+                });
+            }
         }
     });
+
+    /**
+     * Constructs a url with optional path
+     * @param {String} path
+     * @returns {String}
+     */
+    function createUrl (path) {
+
+        var options = this._options,
+            host    = options.host,
+            port    = options.port,
+            url     = 'http://' + host;
+
+        if (port) {
+            url += ':' + port;
+        }
+
+        if (path) {
+            url += path;
+        }
+
+        return url;
+    }
+
+    function getNeo4jNodeId (node) {
+
+        if (node.hasOwnProperty('_data')) {
+            return node._data.id;
+        }
+
+        return null;
+    }
+
+    function createNodeMap (nodes) {
+
+        var map = {};
+
+        _.forEach(nodes, function (node, index) {
+            var id = getNeo4jNodeId(node);
+            if (id !== null) {
+                map[id] = index;
+            }
+        });
+
+        return map;
+    }
 
     return api.SeraphAdapter;
 };

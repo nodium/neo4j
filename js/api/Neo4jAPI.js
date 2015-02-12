@@ -46,70 +46,13 @@ module.exports = function (Nodium, undefined) {
         },
 
         /**
-         * Gets all nodes and edges
+         * Creates a new edge in Neo4j
+         * @param {Object} edgeData
          * @returns {Promise}
          */
-        getGraph: function () {
+        createEdge: function (edgeData) {
 
-            var adapter = this.adapter;
-
-            // return Promise.all([
-            //     adapter.getNodes(),
-            //     adapter.getEdges()
-            // ]);
-
-            // TODO find way to flatten stuff like this
-            return adapter.getNodes()
-                .then(function (nodes) {
-                    return adapter.getEdges()
-                        .then(function (edges) {
-                            return {
-                                nodes: nodes,
-                                edges: edges
-                            };
-                        });
-                });
-
-            // return new Promise(function (resolve, reject) {
-
-            //     var payload,
-            //         query,
-            //         url;
-
-            //     if (1 === _options.version) {
-
-            //         query = 'START n=node(*) RETURN n';
-
-            //     } else {
-
-            //         query = 'START n=node(*) RETURN n, labels(n)';
-            //     }
-
-            //     payload = {
-            //         query: query,
-            //         params: {}
-            //     };
-                
-            //     url = createCypherUrl();
-
-            //     // TODO use promises
-            //     $.post(url, payload)
-            //         .done(function (nodeResult) {
-
-            //         var payload = {
-            //             query: 'START r=relationship(*) RETURN r',
-            //             params: {}
-            //         };
-
-            //         $.post(url, payload)
-            //             .done(function (edgeResult) {
-
-            //             var graph = transformer.neo4j.from(nodeResult, edgeResult);
-
-            //             resolve(graph);
-            //          });
-            //     });
-            // });
+            return this.adapter.createEdge(edgeData);
         },
 
         /**
@@ -120,104 +63,48 @@ module.exports = function (Nodium, undefined) {
          */
         createNode: function (nodeData) {
 
-            return new Promise(function (resolve, reject) {
-
-                var payload,
-                    url;
-                    
-                payload = transformer.neo4j.toNode(nodeData);
-                url     = createNodeUrl();
-
-                $.ajax({
-                    url: url,
-                    data: payload,
-                    type: 'POST',
-                    async: false // It's inside a promise now, so async false doesn't really do much
-                }).done(function (result) {
-
-                    var id = transformer.neo4j.idFromSelf(result.self);
-                    resolve(id);
-                });
-            });
+            return this.adapter.createNode(nodeData);
         },
 
         /**
-         * We're doing this with a cypher,
-         * because we also have to delete all relationships
+         * Delete a node and all relationships
          * @param {Object} nodeData
+         * @returns {Promise}
          */
         deleteNode: function (nodeData) {
 
-            var payload,
-                query,
-                url = createCypherUrl();
-
-            // TODO this query should work, but can't find parameter nodeId
-            // query = {
-            //      "query" : "START n=node({nodeId}) OPTIONAL MATCH n-[r]-() DELETE n,r",
-            //      "params" : {
-            //          "nodeId": nodeId
-            //  }
-            // };
-
-            if (1 === _options.version) {
-
-                query = "START n=node(" + nodeData._id + ") MATCH n-[r?]-() DELETE n,r";
-
-            } else {
-
-                query = "START n=node(" + nodeData._id + ") OPTIONAL MATCH n-[r]-() DELETE n,r";
-            }
-
-            payload = {
-                query: query,
-                params: {}
-            };
-
-            $.post(url, payload);
-        },
-
-        /**
-         * Creates a new edge in Neo4j
-         * @param {Object} edgeData
-         * @returns {Promise}
-         */
-        createEdge: function (edgeData) {
-
-            return new Promise(function (resolve, reject) {
-
-                var payload,
-                    url;
-
-                payload = {
-                    to: createEdgeUrl(edgeData.to._id),
-                    type: edgeData.type
-                };
-
-                url     = createNodeUrl(edgeData.from._id) + '/relationships';
-
-                $.post(url, payload)
-                    .done(function (result) {
-
-                    var id = transformer.neo4j.idFromSelf(result.self);
-
-                    resolve(id);
-                 });
-            });
+            return this.adapter.deleteNode(nodeData);
         },
 
         /**
          * Deletes an edge in the Neo4j database
          * @param {Object} edgeData
+         * @returns {Promise}
          */
         deleteEdge: function (edgeData) {
 
-            var url = createEdgeUrl(edgeData._id);
+            return this.adapter.deleteEdge(edgeData);
+        },
 
-            $.ajax({
-                url: url,
-                type: 'DELETE'
-            });
+        /**
+         * Gets all nodes and edges
+         * @returns {Promise}
+         */
+        getGraph: function () {
+
+            var adapter = this.adapter;
+
+            // TODO find way to flatten stuff like this
+            return adapter.getNodes()
+                .then(function (nodes) {
+                    return adapter.getEdges(nodes)
+                        .then(function (edges) {
+                            return {
+                                nodes: nodes,
+                                edges: edges
+                            };
+                        });
+                });
         },
 
         /**
@@ -226,17 +113,7 @@ module.exports = function (Nodium, undefined) {
          */
         updateNode: function (nodeData) {
 
-            var payload,
-                url;
-
-            payload = transformer.neo4j.toNode(nodeData);
-            url     = createNodeUrl(nodeData._id) + '/properties';
-
-            $.ajax({
-                url: url,
-                type: 'PUT',
-                data: payload
-            });
+            return this.adapter.updateNode(nodeData);
         },
 
         /**
@@ -245,25 +122,32 @@ module.exports = function (Nodium, undefined) {
          */
         updateNodeLabel: function (nodeData) {
 
-            var url;
+            // var url;
 
-            if (1 === _options.version) {
-                return;
-            }
+            // if (1 === _options.version) {
+            //     return;
+            // }
 
             // check if a label was added or removed
-            if (!update.changed(model.Node.getLabelsPath())) {
-                return;
-            }
+            // put in again? or check in consumer??
+            // if (!update.changed(model.Node.getLabelsPath())) {
+            //     return;
+            // }
 
-            url = createNodeUrl(nodeData._id) + '/labels';
+            // url = createNodeUrl(nodeData._id) + '/labels';
 
-            $.ajax({
-                url: url,
-                type: 'PUT',
-                contentType: 'application/json',
-                data: JSON.stringify(nodeData._labels)
-            });
+            // $.ajax({
+            //     url: url,
+            //     type: 'PUT',
+            //     contentType: 'application/json',
+            //     data: JSON.stringify(nodeData._labels)
+            // });
+
+            return this.adapter.call(
+                'node/'+nodeData._data.id+'/labels',
+                'PUT',
+                JSON.stringify(nodeData._labels)
+            );
         }
     });
 
