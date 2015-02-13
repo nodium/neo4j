@@ -163,6 +163,22 @@ module.exports = function (Nodium, undefined) {
             return this
                 .promiseCypher(cypher)
                 .then(transformNodesAndLabels);
+
+            /*
+            return this
+                .promiseCypher(cypher)
+                .then(function (nodesAndLabels) {
+                    _.chain(nodesAndLabels) // [{n: node, labels(n): labels}]
+                        .map(_.pairs) // [[['n', node], ['labels(n)', labels]]]
+                        .map(function (nodeLabelArray) {
+                            var nodeArray = nodeLabelArray[0],
+                                labelArray = nodeLabelArray[1];
+                            return [nodeArray[1], labelArray[1]]
+                        }) // [[node, labels]]
+                        .map(function (// [[nodiumNode, labels]]
+                        // [nodiumNode with labels]
+                })
+            */
         },
 
         /**

@@ -20,6 +20,7 @@ module.exports = function (Nodium, undefined) {
     'use strict';
 
     var Nodium      = Nodium,
+        Node        = Nodium.model.Node2,
         transformer = Nodium.transformer;
 
     /**
@@ -34,22 +35,24 @@ module.exports = function (Nodium, undefined) {
          */
         from: function (seraphNode) {
 
-            var parsedData = this.splitProperties(seraphNode, this.options.map),
-                node = {
-                    _data: seraphNode,
-                    _id: _.uniqueId(),
-                    _labels: [],
-                    _properties: parsedData.properties,
-                };
+            var parsedData = this.splitProperties(seraphNode, this.options.map);
 
-            _.extend(node, parsedData.mapped);
-
-            return node;
+            return new Node(
+                _.uniqueId(),            // this adapter always uses a unique id
+                parsedData.properties,   // the public properties
+                parsedData.mapped,       // the private properties
+                [],                      // labels will be added later
+                { _data: seraphNode }    // this adapter needs raw neo4j data to be stored here
+            );
         },
 
         to: function (nodiumNode) {
 
-            var mappedProperties = this.getMappedProperties(nodiumNode),
+            if (!nodiumNode) {
+                return;
+            }
+
+            var mappedProperties = this.getMappedProperties(nodiumNode._mapped),
                 node = _.extend({}, nodiumNode._properties, mappedProperties);
 
             // place back the neo4j id if it exists

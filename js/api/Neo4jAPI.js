@@ -120,34 +120,15 @@ module.exports = function (Nodium, undefined) {
          * Removes all labels from the node and replaces them with the ones in data
          * @param {String|Array<String>} data
          */
-        updateNodeLabel: function (nodeData) {
-
-            // var url;
-
-            // if (1 === _options.version) {
-            //     return;
-            // }
-
-            // check if a label was added or removed
-            // put in again? or check in consumer??
-            // if (!update.changed(model.Node.getLabelsPath())) {
-            //     return;
-            // }
-
-            // url = createNodeUrl(nodeData._id) + '/labels';
-
-            // $.ajax({
-            //     url: url,
-            //     type: 'PUT',
-            //     contentType: 'application/json',
-            //     data: JSON.stringify(nodeData._labels)
-            // });
+        updateNodeLabels: function (nodeData) {
 
             return this.adapter.call(
                 'node/'+nodeData._data.id+'/labels',
                 'PUT',
-                JSON.stringify(nodeData._labels)
-            );
+                nodeData._labels
+            ).then(function () {
+                return nodeData;
+            });
         }
     });
 

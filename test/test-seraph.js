@@ -3,6 +3,7 @@ var assert        = require('assert'),
 	expect        = chai.expect;
 	should        = chai.should(),
 	Nodium        = require('nodium-core'),
+	Node          = Nodium.model.Node2,
 	SeraphTransformer = require('../js/transformer/SeraphTransformer')(Nodium),
 	transformer   = new SeraphTransformer(),
 	SeraphAdapter = require('../js/adapter/SeraphAdapter')(Nodium),
@@ -86,10 +87,7 @@ describe('Seraph adapter', function () {
 					blaaa: 'bla'
 				}
 			})
-			// .then(function (node) {
-			// 	console.log(node);
-			// 	return node;
-			// })
+			// .then(tap(console.log, console))
 			.then(seraphAdapter.deleteNode.bind(seraphAdapter))
 			// .then(function (result) {
 			// 	console.log(result);
@@ -109,4 +107,44 @@ describe('Neo4j API', function () {
 				.should.be.fulfilled;
 		});
 	});
+	describe('#crudNode()', function () {
+		it('should create a node, update it, then delete it', function () {
+
+			return api.createNode(new Node(
+				null,
+				{ test: 'test', blaaa: 'bla' }
+			))
+			// .then(tap(console.log, console))
+			.then(function (node) {
+				node
+					.setProperty('bla', 'bla')
+					.setProperty('weeee', 'weeee');
+				return node;
+			})
+			.then(api.updateNode.bind(api))
+			// .then(tap(console.log, console))
+			.then(function (node) {
+				node.setLabels(['a', 'b']);
+				node.addLabel('b');
+				node.addLabel('c');
+				return node;
+			})
+			.then(api.updateNodeLabels.bind(api))
+			// .then(tap(console.log, console))
+			.then(api.deleteNode.bind(api))
+			.should.be.fulfilled;
+		});
+	});
 });
+
+function tap (fn, thisArg) {
+
+	return function (promisedValue) {
+
+		thisArg = thisArg || this;
+
+		fn.call(thisArg, promisedValue);
+
+		return promisedValue;
+	}
+}
