@@ -21,14 +21,11 @@ module.exports = function (Nodium, undefined) {
     var SeraphAdapter = require('../adapter/SeraphAdapter')(Nodium);
 
     var api         = Nodium.api,
-        model       = Nodium.model,
-        transformer = Nodium.transformer,
         NodeEvent   = Nodium.event.NodeEvent,
         EdgeEvent   = Nodium.event.EdgeEvent,
         _defaults   = {
             host: 'localhost',
-            port: 7474,
-            version: 2
+            port: 7474
         };
 
     api.Neo4jAPI = Nodium.createClass({
@@ -43,6 +40,16 @@ module.exports = function (Nodium, undefined) {
 
             // seraph is the default adapter
             this.adapter = adapter || new SeraphAdapter();
+        },
+
+        initialize: function () {
+
+            $(this.kernel).on(NodeEvent.CREATED, this.handleNodeCreated.bind(this));
+            $(this.kernel).on(NodeEvent.DESTROYED, this.handleNodeDeleted.bind(this));
+            $(this.kernel).on(EdgeEvent.CREATED, this.handleEdgeCreated.bind(this));
+            $(this.kernel).on(EdgeEvent.DESTROYED, this.handleEdgeDeleted.bind(this));
+            $(this.kernel).on(NodeEvent.UPDATED, this.handleNodeUpdated.bind(this));
+            $(this.kernel).on(NodeEvent.UPDATED, this.handleNodeLabelUpdated.bind(this));
         },
 
         /**
@@ -129,75 +136,101 @@ module.exports = function (Nodium, undefined) {
             ).then(function () {
                 return nodeData;
             });
+        },
+
+
+        /*
+         * Handlers
+         */
+
+        /**
+         * Gets the normalized api content
+         * @param {Function} callback
+         */
+        get: function (callback) {
+
+            this.getGraph().then(callback);
+        },
+
+        /**
+         * Triggered by NodeEvent.CREATED
+         * @param {Object} event
+         * @param {Node} node
+         * @param {Object} data
+         */
+        handleNodeCreated: function (event, node, data) {
+
+            this.createNode(data);
+        },
+
+        /**
+         * Triggered by NodeEvent.DELETED
+         * @param {Object} event
+         * @param {Object} data
+         */
+        handleNodeDeleted: function (event, data) {
+
+            this.deleteNode(data);
+        },
+
+        /**
+         * Triggered by EdgeEvent.CREATED
+         * @param {Object} event
+         * @param {Object} data
+         * @param {Object} source
+         * @param {target} target
+         */
+        handleEdgeCreated: function (event, data, source, target) {
+
+            this.createEdge(data);
+        },
+
+        /**
+         * Triggered by EdgeEvent.DELETED
+         * @param {Object} event
+         * @param {Object} data
+         */
+        handleEdgeDeleted: function (event, data) {
+
+            this.deleteEdge(data);
+        },
+
+        /**
+         * Triggered by NodeEvent.UPDATED
+         * @param {Object} event
+         * @param {Node} node
+         * @param {Object} data
+         * @param {Update} update
+         */
+        handleNodeUpdated: function (event, node, data, update) {
+
+            // check if a property was updated
+            if (!update.changed('_properties') &&
+                !update.changed('_style')) {
+                
+                return;
+            }
+
+            this.updateNode(data);
+        },
+
+        /**
+         * Triggered by NodeEvent.UPDATEDLABEL
+         * @param {Object} event
+         * @param {Node} node
+         * @param {Object} data
+         * @param {Update} update
+         */
+        handleNodeLabelUpdated: function (event, node, data, update) {
+
+            // check if a label was added or removed
+            if (!update.changed('_labels')) {
+                return;
+            }
+
+            this.updateNodeLabels(data);
         }
     });
-
-    /**
-     * Constructs a url with optional path
-     * @param {String} path
-     * @returns {String}
-     *
-     * @author Niko van Meurs <nikovanmeurs@gmail.com>
-     */
-    function createUrl (path) {
-
-        var options = _options,
-            host    = options.host,
-            port    = options.port,
-            url     = 'http://' + host;
-
-        if (port) {
-            url += ':' + port;
-        }
-
-        if (path) {
-            url += path;
-        }
-
-        return url;
-    }
-
-    /**
-     * Constructs a url to execute a Cypher query
-     * @returns {String}
-     */
-    function createCypherUrl () {
-
-        return createUrl('/db/data/cypher');
-    }    
-
-    /**
-     * Constructs a url to edit an edge
-     * @param {Number} [edgeId]
-     * @returns {String}
-     */
-    function createEdgeUrl (edgeId) {
-
-        var path = '/db/data/relationship';
-
-        if (edgeId) {
-            path += '/' + id;
-        }
-
-        return createUrl(path);
-    }
-
-    /**
-     * Constructs a url to edit a node
-     * @param {Number} [nodeId]
-     * @returns {String}
-     */
-    function createNodeUrl (nodeId) {
-
-        var path = '/db/data/node';
-
-        if (nodeId) {
-            path += '/' + nodeId;
-        }
-
-        return createUrl(path);
-    }
-
 
     return api.Neo4jAPI;
 };

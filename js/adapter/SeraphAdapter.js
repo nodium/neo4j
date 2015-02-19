@@ -18,6 +18,7 @@
 const
     seraph            = require('seraph'),
     _                 = require('lodash');
+    request           = require('request');
 
 module.exports = function (Nodium, undefined) {
 
@@ -29,7 +30,7 @@ module.exports = function (Nodium, undefined) {
 
     var api         = Nodium.api,
         _defaults   = {
-            host: 'localhost',
+            host: '127.0.0.1',
             port: 7474
         };
 
@@ -48,6 +49,7 @@ module.exports = function (Nodium, undefined) {
             this.edgeTransformer = edgeTransformer || new SeraphEdgeTransformer();
 
             this.db = seraph(createUrl.call(this));
+            this.db._request = request.bind(this);
         },
 
         call: function (path, method, data) {
@@ -162,7 +164,7 @@ module.exports = function (Nodium, undefined) {
 
             return this
                 .promiseCypher(cypher)
-                .then(transformNodesAndLabels);
+                .then(transformNodesAndLabels, console.log.bind(console));
 
             /*
             return this
@@ -247,6 +249,9 @@ module.exports = function (Nodium, undefined) {
             url += path;
         }
 
+        console.log('connecting to...');
+        console.log(url);
+
         return url;
     }
 
@@ -271,6 +276,94 @@ module.exports = function (Nodium, undefined) {
         });
 
         return map;
+    }
+
+    function request(requestOpts, callback) {
+
+        var url = requestOpts.uri,
+            payload = requestOpts.json,
+            method = requestOpts.method,
+            headers = requestOpts.headers;
+
+        sendRequest(url, payload, method, headers)
+            .then(function (response) {
+                callback(null, response, response.body);
+            }, callback);
+    }
+
+    function sendRequest (url, payload, method, headers) {
+
+        headers = headers || {};
+
+        console.log(url);
+        console.log(method);
+
+        return new Promise (function (resolve, reject) {
+            var request = new XMLHttpRequest(),
+                requestBody;
+
+            request.open(method, url, true);
+
+            // Resolves the Promise if response is OK,
+            // rejects the Promise otherwise
+            request.onload = function () {
+
+                if (200 === request.status) {
+
+                    resolve({
+                        statusCode: request.status,
+                        body: JSON.parse(request.response),
+                        headers: {
+                            location: url
+                        }
+                    });
+
+                } else {
+
+                    reject(Error(request.statusText));
+                }
+            };
+
+            // Rejects the Promise
+            request.onerror = function () {
+
+                reject(Error("Network- or CORS Error"));
+            };
+
+            // Add a request body if payload is present
+            // Converts the payload to JSON if payload is not of type string
+            if (payload) {
+
+                requestBody = (payload instanceof String) ? payload : JSON.stringify(payload);
+                headers['Content-type'] = 'application/json';
+            }
+
+            setHeaders(request, headers);
+
+            request.send(requestBody);
+        });
+    }
+
+    /**
+     * Attaches the headers to the request
+     * @param {XMLHttpRequest} request
+     * @param {Object} headers
+     */
+    function setHeaders(request, headers) {
+
+        // set headers, pass request as scope
+        _.forEach(headers, setHeader, request);
+    }
+
+    /**
+     * Attaches a header to the request object,
+     * Note: the request object needs to be set as the method's scope
+     * @param {String} value
+     * @param {String} key
+     */
+    function setHeader (value, key) {
+
+        this.setRequestHeader(key, value);
     }
 
     return api.SeraphAdapter;
