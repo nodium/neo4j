@@ -43,7 +43,6 @@
 const
     seraph            = require('seraph'),
     _                 = require('lodash');
-    request           = require('request');
 
 module.exports = function (Nodium, undefined) {
 
@@ -87,10 +86,6 @@ module.exports = function (Nodium, undefined) {
         createEdge: function (edge) {
 
             var payload = this.edgeTransformer.to(edge);
-
-            console.log('CREATING EDGE');
-            console.log(edge);
-            console.log(payload);
 
             return this
                 .wrapPromise(this.db.relate)(
@@ -415,7 +410,7 @@ module.exports = function (Nodium, undefined) {
     return api.SeraphAdapter;
 };
 
-},{"../transformer/SeraphEdgeTransformer":6,"../transformer/SeraphNodeTransformer":7,"lodash":195,"request":196,"seraph":259}],3:[function(require,module,exports){
+},{"../transformer/SeraphEdgeTransformer":6,"../transformer/SeraphNodeTransformer":7,"lodash":195,"seraph":201}],3:[function(require,module,exports){
 /**
  * This file is part of the Nodium Neo4j package
  *
@@ -38257,6 +38252,2797 @@ module.exports = function(arr, obj){
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{}],196:[function(require,module,exports){
+var async = require('async');
+var naan = require('naan');
+var _ = require('underscore');
+var util = require('util');
+
+exports.uniqueness = {};
+
+exports.uniqueness.create = function(label, keys, callback) {
+  if (!Array.isArray(keys)) keys = [keys];
+
+  label = encodeURIComponent(label);
+  var body = { property_keys: keys };
+
+  var endpoint = util.format('schema/constraint/%s/uniqueness', label);
+  var op = this.operation(endpoint, 'POST', body);
+  this.call(op, function(err, index) {
+    if (err) callback(err);
+    else callback(null, index);
+  });
+};
+
+exports.uniqueness.createIfNone = function(label, keys, callback) {
+  var self = this;
+  exports.uniqueness.list.call(self, label, keys, function(err, constraints) {
+    if (err) {
+      if (err.statusCode != 404) return callback(err);
+    } else if (constraints.length > 0) return callback(null, constraints[0]);
+    // Seems like sometimes if this is being called very early in neo4j's init
+    // phase, the list command doesn't return a constraint, but the following
+    // calls sends back a 409. So we check for that, and don't send that error
+    // through.
+    exports.uniqueness.create.call(self, label, keys, function(err, constraint) {
+      if (err) {
+        if (err.statusCode == 409) {
+          // in this edgecase there's no way really for us to get the constraint
+          // object, so send back without (for now). hopefully there's a better
+          // way to handle this in the future.
+          return callback();
+        } else {
+          return callback(err);
+        }
+      }
+
+      callback(null, constraint);
+    });
+  });
+};
+
+exports.uniqueness.list = function(label, key, callback) {
+  if (typeof key == 'function') {
+    callback = key;
+    key = null;
+  }
+
+  label = encodeURIComponent(label);
+  var endpoint = util.format('schema/constraint/%s/uniqueness', label);
+
+  if (key) {
+    key = encodeURIComponent(key);
+    endpoint += '/' + key;
+  }
+
+  var op = this.operation(endpoint, 'GET');
+  this.call(op, function(err, constraints) {
+    if (err) callback(err);
+    else callback(null, constraints);
+  });
+};
+
+exports.uniqueness.drop = function(label, key, callback) {
+  label = encodeURIComponent(label);
+  key = encodeURIComponent(key);
+  var endpoint = util.format('schema/constraint/%s/uniqueness/%s', label, key);
+  var op = this.operation(endpoint, 'DELETE');
+  this.call(op, function(err) {
+    if (err) callback(err);
+    else callback();
+  });
+};
+
+exports.list = function(label, callback) {
+  if (typeof label == 'function') {
+    callback = label;
+    label = null; 
+  }
+
+  var endpoint = 'schema/constraint';
+
+  if (label) endpoint += '/' + encodeURIComponent(label);
+
+  var op = this.operation(endpoint, 'GET');
+  this.call(op, function(err, constraints) {
+    if (err) callback(err);
+    else callback(null, constraints);
+  });
+};
+
+},{"async":202,"naan":203,"underscore":262,"util":192}],197:[function(require,module,exports){
+var async = require('async');
+var naan = require('naan');
+var _ = require('underscore');
+var util = require('util');
+
+// although it looks like this will support compound keys, neo4j-2 doesn't yet, 
+// so attempting to create one will just give you an error from neo4j.
+exports.create = function(label, keys, callback) {
+  if (!Array.isArray(keys)) keys = [keys];
+
+  label = encodeURIComponent(label);
+  var body = { property_keys: keys };
+
+  var endpoint = util.format('schema/index/%s', label);
+  var op = this.operation(endpoint, 'POST', body);
+  this.call(op, function(err, index) {
+    if (err) callback(err);
+    else callback(null, index);
+  });
+};
+
+// this will need to be updated when compound keys are supported
+exports.createIfNone = function(label, keys, callback) {
+  var self = this;
+  exports.create.call(self, label, keys, function(err, index) {
+    if (!err) return callback(null, index);
+    if (err.statusCode != 409) return callback(err);
+    exports.list.call(self, label, function(err, indexes) {
+      if (err) return callback(err);
+      var index = indexes.filter(function(index) {
+        return index.property_keys[0] == keys;
+      });
+      callback(null, index[0]);
+    });
+  });
+};
+
+exports.list = function(label, callback) {
+  label = encodeURIComponent(label);
+  var endpoint = util.format('schema/index/%s', label);
+  var op = this.operation(endpoint, 'GET');
+  this.call(op, function(err, indexes) {
+    if (err) callback(err);
+    else callback(null, indexes);
+  });
+};
+
+exports.drop = function(label, key, callback) {
+  label = encodeURIComponent(label);
+  key = encodeURIComponent(key);
+  var endpoint = util.format('schema/index/%s/%s', label, key);
+  var op = this.operation(endpoint, 'DELETE');
+  this.call(op, function(err) {
+    if (err) callback(err);
+    else callback();
+  });
+}
+
+},{"async":202,"naan":203,"underscore":262,"util":192}],198:[function(require,module,exports){
+var async = require('async');
+var naan = require('naan');
+var _ = require('underscore');
+var util = require('util');
+
+function isValidType(type, callback) {
+  if (type !== 'node' && type !== 'relationship') {
+    callback(new Error("Invalid index type (should be 'node' or " +
+          "'relationship'."));
+    return false;
+  }
+  return true;
+}
+
+function saveUnique(mode) {
+  return function() {
+    var args = [].slice.call(arguments);
+    var type = args.shift();
+    args.push(mode);
+    if (type == 'node') return saveUniqueNode.apply(this, args);
+    else return saveUniqueRel.apply(this, args);
+  };
+};
+
+function saveUniqueNode(node, index, key, value, callback, mode) {
+  var self = this;
+
+  var request = {
+    key: key,
+    value: value,
+    properties: node
+  };
+
+  var endpoint = util.format('index/node/%s?uniqueness=%s', index, mode);
+  var op = this.operation(endpoint, 'POST', request);
+  this.call(op, function(err, node) {
+    if (err) return callback(err);
+    callback(null, this._createNodeObject(node));
+  });
+};
+
+function saveUniqueRel(start, rel, end, props, idx, key, value, cb, mode) {
+  var self = this;
+  if (typeof props == 'string') {
+    mode = cb;
+    cb = value;
+    value = key;
+    key = idx;
+    idx = props;
+    props = undefined;
+  }
+
+  start = this._getId(start);
+  end = this._getId(end);
+
+  if (!this._isValidId(start) || !this._isValidId(end)) {
+    return callback(new Error("Invalid ID"));
+  }
+
+  var request = {
+    key: key,
+    value: value,
+    start: this._location('node', start),
+    end: this._location('node', end),
+    type: rel
+  };
+
+  if (props) request.properties = props;
+
+  var endpoint = util.format('index/relationship/%s?uniqueness=%s', idx, mode);
+  var op = this.operation(endpoint, 'POST', request);
+  this.call(op, function(err, rel) {
+    if (err) return cb(err);
+    cb(null, self._createRelationshipObject(rel));
+  });
+};
+
+var indexModule = module.exports = {
+  create: function(type, name, config, callback) {
+    if (typeof name === 'function') {
+      callback = name;
+      name = type;
+      type = 'node';
+      config = null;
+    } else if (typeof config === 'function') {
+      callback = config;
+      if (typeof name === 'object' && !Array.isArray(name)) {
+        config = name;
+        name = type;
+        type = 'node';
+      } else {
+        config = null;
+      }
+    } 
+
+    if (Array.isArray(name)) {
+      var txn = this._safeBatch();
+      var indexer = naan.ncurry(txn[type].legacyindex.create, config, 1);
+      async.map(name, indexer, callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    if (!isValidType(type, callback)) {
+      return;
+    }
+
+    var request = { name: name };
+    if (config != null) {
+      request.config = config;
+    }
+
+    var endpoint = util.format('index/%s', type);
+    var op = this.operation(endpoint, 'POST', request);
+    this.call(op, function(err) {
+      callback(err);
+    });
+  },
+
+  add: function(type, indexName, obj, key, value, callback) {
+    if (typeof value === 'function') {
+      callback = value;
+      value = key;
+      key = obj;
+      obj = indexName;
+      indexName = type;
+      type = 'node';
+    }
+    
+    if (Array.isArray(obj)) {
+      var txn = this._safeBatch();
+      var args = [indexName, key, value];
+      var indexer = naan.ecurry(txn[type].legacyindex.add, args, [0, 2, 3]);
+      async.map(obj, indexer, callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    if (!isValidType(type, callback)) {
+      return;
+    }
+
+    var id = this._getId(obj);
+    if (!this._isValidId(id)) {
+      return callback(new Error("Invalid ID"));
+    }
+    var location = this._location(type, id);
+
+    var request = {
+      uri: location,
+      key: key,
+      value: value
+    };
+
+    indexName = encodeURIComponent(indexName);
+
+    var endpoint = util.format('index/%s/%s', type, indexName);
+    var op = this.operation(endpoint, 'POST', request);
+    this.call(op, function(err) {
+      callback(err);
+    });
+  },
+
+  readAsList: function(type, indexName, key, value, callback) {
+    if (typeof value === 'function') {
+      callback = value;
+      value = key;
+      key = indexName;
+      indexName = type;
+      type = 'node';
+    }
+
+    if (!isValidType(type, callback)) {
+      return;
+    }
+
+    indexName = encodeURIComponent(indexName);
+    value = encodeURIComponent(value); 
+    key = encodeURIComponent(key);
+
+    var ep = util.format('index/%s/%s/%s/%s', type, indexName, key, value);
+    var op = this.operation(ep, 'GET');
+    var self = this;
+    this.call(op, function(err, entities) {
+      if (err) {
+        return callback(err);
+      }
+
+      var entityObjects = entities.map(function(entity) {
+        return type === 'node'
+          ? self._createNodeObject(entity)
+          : self._createRelationshipObject(entity);
+      });
+
+      callback(null, entityObjects);
+    });
+  },
+
+  read: function(type, indexName, key, value, callback) {
+    indexModule.readAsList.call(this, type, indexName, key, value, function (err, results) {
+      if (err) return callback(err);
+
+      if (results.length === 1) {
+        callback(null, results[0]);
+      } else if (results.length === 0) {
+        callback(null, false);
+      } else {
+        callback(null, results);
+      }
+    });
+  },
+
+  getOrSaveUnique: saveUnique('get_or_create'),
+  saveUniqueOrFail: saveUnique('create_or_fail'),
+
+  remove: function(type, indexName, obj, key, value, callback) {
+    if (typeof key === 'function') {
+      callback = key, key = null, value = null;
+    } else if (typeof value === 'function') {
+      callback = value, value = null;
+    }
+    
+    if (Array.isArray(obj)) {
+      var txn = this._safeBatch();
+      var args = [indexName, key, value];
+      var rm = naan.ecurry(txn[type].legacyindex.remove, args, [0, 2, 3]);
+      async.map(obj, rm, callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    var id = this._getId(obj);
+    if (!this._isValidId(id)) {
+      return callback(new Error("Invalid ID"));
+    }
+
+    indexName = encodeURIComponent(indexName);
+    var endpoint = util.format('index/%s/%s', type, indexName);
+  
+    if (key) endpoint += '/' + encodeURIComponent(key);
+    if (value) endpoint += '/' + encodeURIComponent(value)
+
+    endpoint += '/' + id;
+
+    var op = this.operation(endpoint, 'DELETE');
+    this.call(op, function(err) {
+      callback(err);
+    });
+  },
+
+  delete: function(type, indexName, callback) {
+    if (Array.isArray(indexName)) {
+      var txn = this._safeBatch();
+      async.map(indexName, txn[type].legacyindex.delete, callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    indexName = encodeURIComponent(indexName);
+    var endpoint = util.format('index/%s/%s', type, indexName);
+    var op = this.operation(endpoint, 'DELETE');
+    this.call(op, function(err) {
+      callback(err);
+    });
+  }
+};
+
+},{"async":202,"naan":203,"underscore":262,"util":192}],199:[function(require,module,exports){
+var async = require('async');
+var naan = require('naan');
+var _ = require('underscore');
+var util = require('util');
+
+var node = module.exports = {
+  /**
+   * Save or update an object. If a new object is passed, the callback will
+   * return a copy of that object with the <options.id> key set to the id of the
+   * created object.
+   */
+  save: function(obj, key, val, callback) {
+    if (typeof key == 'function') {
+      callback = key;
+      key = val = undefined;
+    } else if (typeof val == 'function') {
+      callback = val;
+      val = undefined;
+    }
+
+    var label = undefined;
+    if (key != undefined && val == undefined) label = key;
+
+    if (label) {
+      if (this.isBatch) {
+        return callback(new Error("node.save with labels is not compatible with "
+                + "batch mode. Use db.save & db.label instead."));
+      }
+      var txn = this._safeBatch();
+      var node = txn.save(obj);
+      txn.label(node, label);
+      return this._safeBatchCommit(txn, function(err, result) {
+        if (err) callback(err);
+        else callback(null, result[node]);
+      });
+    } 
+
+    if (Array.isArray(obj)) {
+      var txn = this._safeBatch();
+      var args = [key, val];
+      async.map(obj, naan.ecurry(txn.save, args, [1, 2]), callback);
+      return this._safeBatchCommit(txn);
+    }
+    
+    var id = this._getId(obj, !key);
+    
+    if (!this._isValidId(id)) {
+      if (typeof obj !== 'object') {
+        return callback(new Error("No data to save"));
+      }
+
+      this.node._create(obj, callback);
+    } else {
+      if (val) this.node._updateProp(obj, key, val, callback);
+      else this.node._update(obj, callback);
+    }
+  },
+
+  /**
+   * Create a new object. Maps to /node.
+   */
+  _create: function(obj, callback) {
+    var op = this.operation('node', obj);
+    this.call(op, function(err, body, location) {
+      if (err) {
+        return callback(err);
+      }
+
+      var result = _.clone(obj);
+      result[this.options.id] = this._extractId(location);
+
+      callback(null, result);
+    });
+  },
+
+  /**
+   * Save the properties of an object. Maps to PUT /node/{id}/properties.
+   */
+  _update: function(obj, callback) {
+    var id = this._getId(obj, true);
+    if (!this._isValidId(id)) {
+      return callback(new Error("Invalid ID"));
+    }
+
+    var untouchedObj = _.clone(obj);
+    if (untouchedObj[this.options.id] != null) {
+      delete untouchedObj[this.options.id];
+    }
+
+    var endpoint = util.format('%s/properties', this._nodeRoot(id));
+    var op = this.operation(endpoint, 'PUT', untouchedObj);
+    this.call(op, function(err, body, response) {
+      if (err) {
+        return callback(err);
+      } else {
+        return callback(null, obj);
+      }
+    });
+  },
+
+  _updateProp: function(obj, key, val, callback) {
+    var id = this._getId(obj);
+    if (!this._isValidId(id)) {
+      return callback(new Error("Invalid ID"));
+    }
+
+    var endpoint = util.format('%s/properties/%s', this._nodeRoot(id), key);
+    var op = this.operation(endpoint, 'PUT', val);
+    this.call(op, function(err, body) {
+      if (err) return callback(err);
+      else {
+        obj = _.clone(obj);
+        obj[key] = val;
+        callback(null, obj);
+      }
+    });
+  },
+
+  /**
+   * Read an object's properties. Maps to GET node/{id}/properties.
+   */
+  read: function(id, property, callback) {
+    if (typeof property == 'function') {
+      callback = property;
+      property = null;
+    }
+
+    if (Array.isArray(id)) {
+      var txn = this._safeBatch();
+      async.map(id, naan.ncurry(txn.read, property, 1), callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    id = this._getId(id);
+    if (!this._isValidId(id)) {
+      return callback(new Error("Invalid ID"));
+    }
+
+    var endpoint;
+    if (!property) 
+      endpoint = util.format('%s/properties', this._nodeRoot(id));
+    else
+      endpoint = util.format('%s/properties/%s', this._nodeRoot(id), property);
+    var op = this.operation(endpoint);
+    this.call(op, function(err, body) {
+      if (err) {
+        return callback(err);
+      } else {
+        if (!property) body[this.options.id] = id;
+        return callback(null, body);
+      }
+    });
+  },
+
+  /**
+   * Delete an object. Maps to DELETE node/{id}
+   * If force is truthy, delete node and all its relations.
+   */
+  delete: function(id, force, callback) {
+    var property = null;
+    if (typeof force == 'function') {
+      callback = force;
+      force = false;
+    } else if (typeof force == 'string') {
+      property = force;
+      force = false;
+    }
+
+    if (Array.isArray(id)) {
+      var txn = this._safeBatch();
+      async.map(id, naan.ncurry(txn.node.delete, force || property, 1), callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    var object = id;
+    id = this._getId(id);
+    if (!this._isValidId(id)) {
+      return callback(new Error("Invalid ID"));
+    }
+
+    if (!force) {
+      var endpoint;
+      if (!property) endpoint = this._nodeRoot(id);
+      else
+        endpoint = util.format('%s/properties/%s', this._nodeRoot(id), property);
+      var op = this.operation(endpoint, 'DELETE');
+      this.call(op, function(err) { 
+        if (!property || err || typeof object != 'object') callback(err);
+        else {
+          delete object[property];
+          callback(null, object);
+        }
+      });
+    } else {
+      this.query([
+        'START node=node({root})',
+        'OPTIONAL MATCH node-[rel]-()',
+        'DELETE node, rel'
+      ].join(' '), {root: id}, function(err) { callback(err) });
+    }
+  },
+
+  /**
+   * Relate objects together. maps to POST node/{first}/relationships
+   */
+  relate: function(startNode, type, endNode, properties, callback) {
+    this.rel.create(startNode, type, endNode, properties, callback);
+  },
+
+  /**
+   * Retrieve a set of relationships for the given node. Optionally specify the
+   * direction and relationship name.
+   *
+   * `direction` must be one of "all", "in" or "out".
+   *
+   * db.relationships(obj|id, [direction, [relationshipName]], callback)
+   */
+  relationships: function(obj, direction, relName, callback) {
+    if (typeof direction === 'function') {
+      callback = direction;
+      direction = 'all';
+      relName = '';
+    } else {
+      if (typeof relName === 'function') {
+        callback = relName;
+        relName = '';
+      }
+
+      if (typeof direction !== 'string') {
+        return callback(new Error('Invalid direction - ' + direction));
+      } else if (typeof relName !== 'string') {
+        return callback(new Error('Invalid relationship name - ' + relName));
+      }
+
+      direction = direction.toLowerCase();
+      if (['in', 'all', 'out'].indexOf(direction) === -1) {
+        return callback(new Error('Invalid direction - ' + direction));
+      }
+    }
+
+    if (Array.isArray(obj)) {
+      var txn = this._safeBatch();
+      var args = [ direction, relName ];
+      var rels = naan.ecurry(txn.node.relationships, args, [1, 2]);
+      async.map(obj, rels, callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    var objId = this._getId(obj);
+
+    if (!this._isValidId(objId)) {
+      callback(new Error("Invalid ID"));
+    }
+
+    var nodeRoot = this._nodeRoot(objId);
+    var endpoint = util.format('%s/relationships/%s', nodeRoot, direction);
+    if (relName) {
+      endpoint += "/" + relName;
+    }
+    var op = this.operation(endpoint);
+    var self = this;
+    this.call(op, function(err, rels) {
+      if (err) {
+        callback(err);
+      } else {
+        rels = rels.map(function(rel) {
+          return self._createRelationshipObject(rel);
+        });
+        callback(null, rels);
+      }
+    });
+  },
+
+  /**
+   * Perform a query based on a predicate. The predicate is translated to a
+   * cypher query.
+   */
+  find: function(predicate, any, label, callback) {
+    if (typeof any == 'function') {
+      callback = any;
+      any = false;
+      label = null;
+    } else if (typeof label == 'function') {
+      callback = label;
+      if (typeof any == 'string') {
+        label = any;
+        any = false;
+      } else {
+        label = null;
+      }
+    } 
+    
+    if (Array.isArray(predicate)) {
+      var txn = this._safeBatch();
+      var finder = naan.ecurry(txn.node.find, [any, label], [1, 2]);
+      async.map(predicate, finder, callback);
+      return this._safeBatchCommit(txn);
+    } 
+
+    if (typeof predicate !== 'object') callback(new Error('Invalid Predicate'));
+
+    var matchers = Object.keys(predicate).reduce(function(matchers, key) {
+      return matchers.push(util.format("n.%s = {%s}", key, key)), matchers;
+    }, []);
+
+    var cypher = [ 
+      label == null ? "MATCH n" : util.format("MATCH (n:`%s`)", label),
+      matchers.length > 0 ? "WHERE" : "",
+      matchers.join(any ? " or " : " and "), 
+      "RETURN n"
+    ].join(" ");
+
+    this.query(cypher, predicate, callback);
+  },
+
+  label: function(node, label, replace, callback) {
+    if (typeof replace == 'function') {
+      callback = replace;
+      replace = false;
+    }
+
+    if (Array.isArray(node)) {
+      var txn = this._safeBatch();
+      async.map(node, naan.ecurry(txn.label, [label, replace], [1,2]), callback);
+      return this._safeBatchCommit(txn);
+    }
+    
+    var id = this._getId(node);
+    if (!this._isValidId(id)) return callback(new Error("Invalid ID"));
+
+    var endpoint = util.format('%s/labels', this._nodeRoot(id));
+    var op = this.operation(endpoint, replace ? 'PUT' : 'POST', label);
+    this.call(op, function(err) {
+      if (err) callback(err);
+      else callback();
+    });
+  },
+
+  removeLabel: function(node, label, callback) {
+    if (Array.isArray(node)) {
+      var txn = this._safeBatch();
+      async.map(node, naan.ncurry(txn.removeLabel, label, 1), callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    var id = this._getId(node);
+    if (!this._isValidId(id)) return callback(new Error("Invalid ID"));
+
+    var endpoint = util.format('%s/labels/%s', this._nodeRoot(id), label);
+    var op = this.operation(endpoint, 'DELETE');
+    this.call(op, function(err) {
+      if (err) callback(err);
+      else callback();
+    });
+  },
+
+  nodesWithLabel: function(label, callback) {
+    var endpoint = util.format('label/%s/nodes', label);
+    var op = this.operation(endpoint, 'GET');
+    this.call(op, function(err, nodes) {
+      if (err || !nodes) return callback(err, nodes);
+      nodes = nodes.map(this._createNodeObject);
+      callback(null, nodes);
+    });
+  },
+
+  readLabels: function(node, callback) {
+    if (typeof node == 'function') {
+      callback = node;
+      node = undefined;
+    }
+
+    if (Array.isArray(node)) {
+      var txn = this._safeBatch();
+      async.map(node, txn.readLabels, function(err, allLabels) {
+        if (err) return callback(err);
+        callback(null, _.uniq(_.flatten(allLabels)));
+      });
+      return this._safeBatchCommit(txn);
+    }
+
+    var endpoint;
+    if (node) {
+      var id = this._getId(node);
+      if (!this._isValidId(id)) return callback(new Error("Invalid ID"));
+      endpoint = util.format('%s/labels', this._nodeRoot(id));
+    } else {
+      endpoint = 'labels';
+    }
+    var op = this.operation(endpoint, 'GET');
+    this.call(op, function(err, labels) {
+      if (err) callback(err);
+      else callback(null, labels);
+    });
+  }
+}
+
+},{"async":202,"naan":203,"underscore":262,"util":192}],200:[function(require,module,exports){
+var async = require('async');
+var naan = require('naan');
+var _ = require('underscore');
+var util = require('util');
+
+module.exports = {
+  /**
+   * Create a new relationship between two nodes. Maps to 
+   * POST node/<startNodeId>/relationship
+   */
+  create: function(startNode, type, endNode, properties, callback) {
+    if (typeof properties === 'function') {
+      callback = properties;
+      properties = null;
+    }
+
+    if (Array.isArray(startNode)) {
+      var txn = this._safeBatch();
+      var args = [ type, endNode, properties ];
+      async.map(startNode, naan.ecurry(txn.rel.create, args, [1,2,3]), 
+          function(err, rels) {
+            if (!err && Array.isArray(endNode))
+              return callback(err, _.flatten(rels));
+            callback(err, rels);
+          });
+      return this._safeBatchCommit(txn);
+    } else if (Array.isArray(endNode)) {
+      var txn = this._safeBatch();
+      var args = [ startNode, type, properties ];
+      async.map(endNode, naan.ecurry(txn.rel.create, args, [0,1,3]), callback);
+      return this._safeBatchCommit(txn);
+    }
+    
+    var startNodeId = this._getId(startNode),
+        endNodeId = this._getId(endNode);
+
+    if (!this._isValidId(startNodeId) ||
+        !this._isValidId(endNodeId)) {
+      return callback(new Error("Invalid ID"));
+    }
+
+    var request = {
+      to: this._location('node', endNodeId),
+      type: type,
+    };
+
+    if (properties) {
+      request['data'] = properties;
+    }
+
+    var endpoint = util.format('%s/relationships', this._nodeRoot(startNodeId));
+    var op = this.operation(endpoint, 'POST', request);
+    this.call(op, function(err, rel) {
+      if (err) {
+        callback(err);
+      } else {
+        callback(null, this._createRelationshipObject(rel));
+      }
+    });
+  },
+
+  /**
+   * Update the properties of a given relationship. Maps to
+   * PUT relationship/<id>/properties
+   */
+  update: function(rel, key, val, callback) {
+    if (typeof key == 'function') {
+      callback = key;
+      key = val = undefined;
+    }
+
+    if (Array.isArray(rel)) {
+      var txn = this._safeBatch();
+      var args = [key, val];
+      async.map(rel, naan.ecurry(txn.rel.update, args, [1, 2]), callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    var id = this._getId(rel);
+
+    if (!this._isValidId(id)) {
+      return callback(new Error("Invalid ID"));
+    }
+
+    var endpoint = util.format('%s/properties', this._relRoot(id));
+    if (key) endpoint += '/' + key;
+
+    var op = this.operation(endpoint, 'PUT', key ? val : rel.properties);
+    this.call(op, function(err) {
+      callback(err);
+    });
+  }, 
+
+  read: function(id, callback) {
+    if (Array.isArray(id)) {
+      var txn = this._safeBatch();
+      async.map(id, txn.rel.read, callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    id = this._getId(id);
+
+    if (!this._isValidId(id)) {
+      return callback(new Error("Invalid ID"));
+    }
+
+    var endpoint = this._relRoot(id);
+    var op = this.operation(endpoint);
+    this.call(op, function(err, rel) {
+      if (err) {
+        callback(err);
+      } else {
+        callback(null, this._createRelationshipObject(rel));
+      }
+    });
+  },
+
+  delete: function(id, callback) {
+    if (Array.isArray(id)) {
+      var txn = this._safeBatch();
+      async.map(id, txn.rel.delete, callback);
+      return this._safeBatchCommit(txn);
+    }
+
+    id = this._getId(id);
+
+    if (!this._isValidId(id)) {
+      return callback(new Error("Invalid ID"));
+    }
+
+    var endpoint = this._relRoot(id);
+    var op = this.operation(endpoint, 'DELETE');
+    this.call(op, function(err, rel) {
+      callback(err);
+    });
+  }
+};
+
+},{"async":202,"naan":203,"underscore":262,"util":192}],201:[function(require,module,exports){
+var naan = require('naan');
+var async = require('async');
+var request = require('request');
+var _ = require('lodash');
+var assert = require('assert');
+var util = require('util');
+
+var defaultOptions = {
+    // Location of the server
+    server: 'http://localhost:7474'
+
+    // datbase endpoint
+  , endpoint: '/db/data'
+
+    // The key to use when inserting an id into objects. 
+  , id: 'id'
+}, optionKeys = Object.keys(defaultOptions);
+
+// Bind all functions of an object to a context (recursively)
+var bindAllTo = function(context, all) {
+  return Object.keys(all).reduce(function(bound, key) {
+    if (typeof all[key] == 'object') bound[key] = bindAllTo(context, all[key]);
+    else if (typeof all[key] == 'function') bound[key] = all[key].bind(context);
+    else bound[key] = all[key];
+    return bound;
+  }, {});
+}
+
+function Seraph(options) {
+  if (typeof options === 'string') {
+    options = { server: options };
+  };
+  this.options = _.extend({}, defaultOptions, options);
+  this.options.server = this.options.server
+    .replace(/\/$/, '');        // remove trailing /
+  this.options.endpoint = this.options.endpoint
+    .replace(/\/$/, '')         // remove trailing /
+    .replace(/^([^\/])/, '/$1'); // add leading /
+
+  _.bindAll.apply(_, [this].concat(_.functions(this)));
+
+  this.node = bindAllTo(this, require('./node'));
+  this.relationship = this.rel = bindAllTo(this, require('./relationship'));
+  this.index = bindAllTo(this, require('./index'));
+  this.constraints = bindAllTo(this, require('./constraints'));
+  var legacyindexGeneric = bindAllTo(this, require('./legacyindex'));
+
+
+  // Alias & curry seraph.index on seraph.node & seraph.rel
+  this.node.legacyindex = naan.curry(legacyindexGeneric.add, 'node');
+  this.rel.legacyindex = naan.curry(legacyindexGeneric.add, 'relationship');
+  naan.ecrock(this.node.legacyindex, legacyindexGeneric, naan.curry, 'node');
+  naan.ecrock(this.rel.legacyindex, legacyindexGeneric, naan.curry, 'relationship');
+
+  _.extend(this, this.node);
+}
+
+/**
+ * Create an operation that can later be passed to call().
+ *
+ * Path is relative to the service endpoint - `node` gets
+ * transformed to `<options.server><options.endpoint>/node`.
+ * 
+ * If `method` is not supplied, it will default GET, unless `data`
+ * is supplied, in which case it will default to 'POST'.
+ *
+ * seraph#operation(opts, path, [method='get'], [data]);
+ */
+Seraph.prototype.operation = function(path, method, data) {
+  // Get args in the right order
+  if (typeof data === 'undefined') {
+    data = null;
+  }
+  if (typeof method === 'object') {
+    data = method;
+    method = 'POST';
+  }
+  if (typeof method === 'undefined') {
+    method = 'GET';
+  }
+
+  // Ensure we have a usable HTTP verb.
+  if (typeof method !== 'string') {
+    throw new Error('Invalid HTTP Verb - ' + method);
+  } else {
+    method = method.toUpperCase();
+  }
+
+  return {
+    'method': method,
+    'to'    : path,
+    'body'  : data
+  };
+};
+
+// returns a new batch if the context was not already that of a batch - prevents
+// batch nesting which can break intra-batch referencing
+Seraph.prototype._safeBatch = function() {
+  return this.isBatch ? this : this.batch();
+};
+
+// similarly, this takes a BatchSeraph and only commits it if the calling context 
+// is not that of a batch.
+Seraph.prototype._safeBatchCommit = function(txn, callback) {
+  if (this.isBatch) {
+    if (callback) this.commitCallbacks.push(callback);
+  } else {
+    txn.commit(callback);
+  }
+};
+
+/**
+ * Function to call an HTTP request to the rest service.
+ * 
+ * Requires an operation object of form:
+ *   { method: 'PUT'|'POST'|'GET'|'DELETE'
+ *   , to    : path,
+ *   , body  : object }
+ *
+ * Operation objects are easily created by seraph#operation.
+ *
+ * seraph#call(operation, callback);
+ */
+Seraph.prototype.call = function(operation, callback) {
+  // Ensure callback is callable. Throw instead of calling back if none.
+  if (typeof callback !== 'function') {
+    callback = function(err) {
+      if (err) throw err;
+    }
+  }
+
+  var requestOpts = {
+    uri: this.options.server + this.options.endpoint + '/' + operation.to,
+    method: operation.method,
+    headers: { 'Accept': 'application/json' }
+  };
+
+  if (operation.body) requestOpts.json = operation.body;
+  callback = _.bind(callback, this);
+  
+  // Allows mocking
+  (this._request || request)(requestOpts, function(err, response, body) {
+    if (err) {
+      callback(err);
+    } else if (response.statusCode < 200 || response.statusCode >= 300) {
+      if (typeof body == 'string') {
+        try {
+          body = JSON.parse(body);
+        } catch (error) {}
+      }
+      // Pass on neo4j error
+      var error;
+      if (typeof body == "object" && body.exception) {
+        error = new Error(body.message);
+        error.neo4jError = body;
+        error.neo4jException = body.exception;
+        error.neo4jStacktrace = body.stacktrace;
+        if (body.cause) error.neo4jCause = body.cause;
+      } else {
+        // Can't understand this as a neo4j error
+        error = new Error(body || response.statusCode);
+        error.response = response;
+      }
+      error.statusCode = response.statusCode;
+      callback(error);
+    } else {
+      if (operation.method === 'GET' && response.statusCode === 204) {
+        var error = new Error("no content");
+        error.statusCode = response.statusCode;
+        return callback(error);
+      }
+      
+      _.defer(function() {
+
+      if (body === '') body = null;
+      else if (typeof body === 'string') {
+        try {
+          body = JSON.parse(body);
+        } catch (e) {
+          return callback(e);
+        }
+      }
+
+      callback(null, body, response.headers.location);
+      });
+    }
+  });
+};
+
+/**
+ * If `obj` is an object, return the value of key <options.id>. Otherwise,
+ * return `obj`.
+ *
+ * If `requireData` is truthy, `obj` must be an object, otherwise undefined is
+ * returned.
+ */
+Seraph.prototype._getId = function(obj, requireData) {
+  var id;
+  if (requireData) {
+    id = typeof obj == 'object' ? obj[this.options.id] : undefined;
+  } else if (this._isBatchId(obj)) {
+    return obj;
+  } else {
+    id = typeof obj == 'object' ? obj[this.options.id] : obj;
+  }
+
+  if (id != null) id = parseInt(id, 10);
+  return id;
+};
+
+Seraph.prototype._isValidId = function(id) {
+  return !isNaN(parseInt(id, 10)) || this._isBatchId(id);
+};
+
+/**
+ * Take the end off a url and parse it as an int
+ */
+Seraph.prototype._extractId = function(location) {
+  var matches = location.match(/\/(\d+)$/);
+  if (!matches) {
+    return null;
+  }
+
+  return parseInt(matches[1], 10);
+};
+
+/**
+ * Infer whether or not the given object is a node
+ */
+Seraph.nodeFlags = [ 
+  'outgoing_relationships',
+  'incoming_relationships',
+  'all_relationships',
+  'data',
+  'properties',
+  'self'
+];
+Seraph.prototype._isNode = function(node) {
+  if (!node || typeof node !== 'object') {
+    return false;
+  }
+
+  var inNode = node.hasOwnProperty.bind(node);
+  return Seraph.nodeFlags.every(inNode) && 
+         typeof node.data === 'object';
+};
+
+/**
+ * Infer whether or not the given object is a relationship
+ */
+Seraph.relationshipFlags = [
+  'start',
+  'data',
+  'self',
+  'properties',
+  'end'
+];
+Seraph.prototype._isRelationship = function(rel) {
+  if (!rel || typeof rel !== 'object') {
+    return false;
+  }
+
+  var inRelationship = rel.hasOwnProperty.bind(rel);
+  return Seraph.relationshipFlags.every(inRelationship) &&
+         typeof rel.data === 'object';
+};
+
+Seraph.prototype._isBatchId = function(id) {
+  return this.isBatch && typeof id == 'string' && id.match(/^{\d+}$/);
+};
+
+Seraph.prototype._nodeRoot = function(id) {
+  return this._isBatchId(id) ? id : 'node/' + id;
+};
+
+Seraph.prototype._relRoot = function(id) {
+  return this._isBatchId(id) ? id : 'relationship/' + id;
+};
+
+/**
+ * Returns the url to an entity given an id
+ */
+Seraph.prototype._location = function(type, id) {
+  if (this._isBatchId(id)) return id;
+  return util.format('%s%s/%s/%d',
+                     this.options.server, this.options.endpoint, type, id);
+};
+
+/**
+ * Create a relationship object from the given relationship data returned from
+ * the neo4j server
+ */
+Seraph.prototype._createRelationshipObject = function(relationshipData) {
+  var relationshipObj = { 
+    start: this._extractId(relationshipData.start),
+    end: this._extractId(relationshipData.end),
+    type: relationshipData.type,
+    properties: relationshipData.data
+  };
+
+  relationshipObj[this.options.id] = this._extractId(relationshipData.self);
+
+  return relationshipObj;
+};
+
+/** 
+ * Create a node object from the given node data return from the neo4j server
+ */
+Seraph.prototype._createNodeObject = function(nodeData) {
+  var nodeObj = nodeData.data || {};
+  nodeObj[this.options.id] = this._extractId(nodeData.self);
+
+  return nodeObj;
+};
+
+  /**
+   * Perform a cypher query. Maps to POST cypher
+   */
+Seraph.prototype.queryRaw = function(query, params, callback) {
+  if (typeof query !== 'string') {
+    return callback(new Error('Invalid Query'));
+  }
+  if (typeof params !== 'object') {
+    if (typeof params === 'function') {
+      callback = params;
+    }
+    params = {};
+  }
+
+  query = { query: query, params: params };
+  var op = this.operation('cypher', query);
+  this.call(op, function(err, result) {
+    if (err) {
+      callback(err);
+    } else {
+      callback(null, result);
+    }
+  });
+};
+
+/**
+ * Perform a cypher query and map the columns and results together.
+ */
+Seraph.prototype.query = function(query, params, callback) {
+  if (typeof params !== 'object') {
+    if (typeof params === 'function') {
+      callback = params;
+    }
+    params = {};
+  }
+  
+  var self = this;
+  this.queryRaw(query, params, function(err, result) {
+    if (err) {
+      return callback(err);
+    }
+    
+    var namedResults = result.data.map(function(row) {
+      return result.columns.reduce(function(rowObj, columnName, columnIndex) {
+        var resultItem = row[columnIndex];
+        function extractAttributes(item) {
+          if (self._isNode(item)) {
+            return self._createNodeObject(item);
+          } else if (self._isRelationship(item)) {
+            return self._createRelationshipObject(item);
+          } else if (item === Object(item)) {
+            var temp = {};
+            Object.keys(item).forEach(function(key) {
+              temp[key] = extractAttributes(item[key])
+            })
+            return temp;
+          } else {
+            return item;
+          }
+        }
+        if (Array.isArray(resultItem))
+          rowObj[columnName] = resultItem.map(extractAttributes);
+        else
+          rowObj[columnName] = extractAttributes(resultItem);
+        
+        return rowObj;
+      }, {});
+    });
+
+    if (namedResults.length > 0) {
+      var resultsAreObjects = typeof namedResults[0][result.columns[0]] == 'object';
+      if (result.columns.length === 1 && resultsAreObjects) {
+        namedResults = namedResults.map(function(namedResult) {
+          return namedResult[result.columns[0]];
+        });
+      } else if (namedResults.length == 1 && !resultsAreObjects) {
+        namedResults = namedResults[0];
+      }
+    }
+
+    callback(null, namedResults);
+  });
+};
+
+var globalCounter = 0;
+function wrapForBatchFormat(id) { return '{' + id + '}' };
+function BatchSeraphId(id, refersTo, batch) {
+  if (Array.isArray(refersTo)) {
+    refersTo = refersTo.map(wrapForBatchFormat);
+    refersTo.forEach(function(id, index) {
+      this[index] = id;
+    }.bind(this));
+  } else {
+    refersTo = wrapForBatchFormat(refersTo);
+  }
+
+  this.id = id;
+  this.refersTo = refersTo;
+  this.batch = batch;
+}
+Object.defineProperty(BatchSeraphId.prototype, 'valueOf', {
+  enumerable: false, configurable: false, writable: false,
+  value: function() { return this.id }
+});
+Object.defineProperty(BatchSeraphId.prototype, 'toString', {
+  enumerable: false, configurable: false, writable: false,
+  value: function() { return this.id } 
+});
+
+function BatchSeraph(parentSeraph) {
+  var self = this;
+  var uniq = Date.now() + ++globalCounter;
+
+  function isBatchId(id) {
+    return id instanceof BatchSeraphId && id.batch == uniq;
+  };
+
+  function createId(id, refersTo) {
+    return new BatchSeraphId(id, refersTo, uniq);
+  };
+
+  function transformBatchArgs(args) {
+    return args.map(function(arg) {
+      if (Array.isArray(arg)) return transformBatchArgs(arg);
+      return isBatchId(arg) ? arg.refersTo : arg;
+    });
+  };
+
+  function wrapFunctions(parent, target) {
+    var derived = target || {};
+
+    Object.keys(parent).forEach(function(key) {
+      var valueType = typeof parent[key];
+
+      if (valueType === 'function') {
+        derived[key] = wrapFunction(parent[key]);
+
+        if (Object.keys(parent[key]).length > 0) {
+          derived[key] = wrapFunctions(parent[key], derived[key]);
+        }
+      } else if (valueType === 'object') {
+        derived[key] = wrapFunctions(parent[key]);
+      } else {
+        derived[key] = parent[key];
+      }
+    });
+    return derived;
+  }
+
+  function wrapFunction(fn) {
+    fn = naan.rcurry(fn, function(err, result) {
+      if (err && !self.error) self.error = err;
+      self.results.push(result);
+      var cb = self.callbacks.shift();
+      if (cb) cb(err, result);
+    });
+    return function() {
+      self.operationQueueStack.unshift([]);
+
+      var args = [].slice.apply(arguments);
+
+      if (args.length > 1 && typeof args[args.length - 1] == 'function') {
+        self.callbacks.push(args.pop());
+      } else {
+        self.callbacks.push(null);
+      }
+
+      args = transformBatchArgs(args);
+
+      // Context does not matter because all functions are bound upon seraph init
+      fn.apply(undefined, args);
+
+      var operationIds = _.pluck(self.operationQueueStack[0], 'id');
+      self.operationQueueStack.shift();
+
+      var operationId = operationIds.length 
+        ? operationIds[0] - self.operationOffset : undefined;
+
+      if (operationIds.length > 1) {
+        self.operationOffset += operationIds.length - 1;
+        operationId = createId(operationId, operationIds);
+      } else if (operationId != null) {
+        operationId = createId(operationId, operationIds[0]);
+      }
+
+      return operationId;
+    };
+  }
+
+  this.super = new Seraph(parentSeraph.options);
+  this.__proto__ = wrapFunctions(this.super);
+  this.isBatch = this.super.isBatch = true;
+  this.batch = undefined; // disabled nesting.
+  this.processors = [];
+  this.operations = [];
+  this.callbacks = [];
+  this.results = [];
+  this.operationOffset = 0;
+  this.operationQueueStack = [];
+  this.commitCallbacks = [];
+
+  this.super.call = function(operation, processor) {
+    operation.id = self.operations.length;
+    if (!operation.body) delete operation.body;
+
+    self.operations.push(operation);
+    self.processors.push(processor.bind(self.super));
+    self.operationQueueStack[0].push(operation);
+  };
+  
+  this.commit = function(callback) {
+    if (callback) self.commitCallbacks.push(callback);
+    if (self.error) {
+      return self.commitCallbacks.forEach(function(callback) {
+        callback(self.error);
+      });
+    }
+    var op = parentSeraph.operation('batch', 'POST', self.operations);
+    parentSeraph.call(op, function(err, results) {
+      if (err) {
+        while (self.callbacks.length) {
+          var cb = self.callbacks.shift();
+          if (cb) cb(err);
+        }
+        return self.commitCallbacks.forEach(function(callback) {
+          callback(err);
+        });
+      }
+
+      results.forEach(function(result) {
+        self.processors.shift()(null, result.body || {}, result.location);
+      });
+
+      self.commitCallbacks.forEach(function(callback) {
+        callback(null, self.results);
+      });
+    });
+  };
+}
+
+Seraph.prototype.isBatch = false;
+
+Seraph.prototype.batch = function(operations, callback) {
+  if (!arguments.length) return new BatchSeraph(this);
+
+  var batchSeraph = new BatchSeraph(this);
+  operations(batchSeraph);
+  batchSeraph.commit(callback);
+};
+
+module.exports = function(options) {
+  return new Seraph(options);
+};
+
+},{"./constraints":196,"./index":197,"./legacyindex":198,"./node":199,"./relationship":200,"assert":9,"async":202,"lodash":195,"naan":203,"request":204,"util":192}],202:[function(require,module,exports){
+(function (process){
+/*global setImmediate: false, setTimeout: false, console: false */
+(function () {
+
+    var async = {};
+
+    // global on the server, window in the browser
+    var root, previous_async;
+
+    root = this;
+    if (root != null) {
+      previous_async = root.async;
+    }
+
+    async.noConflict = function () {
+        root.async = previous_async;
+        return async;
+    };
+
+    function only_once(fn) {
+        var called = false;
+        return function() {
+            if (called) throw new Error("Callback was already called.");
+            called = true;
+            fn.apply(root, arguments);
+        }
+    }
+
+    //// cross-browser compatiblity functions ////
+
+    var _each = function (arr, iterator) {
+        if (arr.forEach) {
+            return arr.forEach(iterator);
+        }
+        for (var i = 0; i < arr.length; i += 1) {
+            iterator(arr[i], i, arr);
+        }
+    };
+
+    var _map = function (arr, iterator) {
+        if (arr.map) {
+            return arr.map(iterator);
+        }
+        var results = [];
+        _each(arr, function (x, i, a) {
+            results.push(iterator(x, i, a));
+        });
+        return results;
+    };
+
+    var _reduce = function (arr, iterator, memo) {
+        if (arr.reduce) {
+            return arr.reduce(iterator, memo);
+        }
+        _each(arr, function (x, i, a) {
+            memo = iterator(memo, x, i, a);
+        });
+        return memo;
+    };
+
+    var _keys = function (obj) {
+        if (Object.keys) {
+            return Object.keys(obj);
+        }
+        var keys = [];
+        for (var k in obj) {
+            if (obj.hasOwnProperty(k)) {
+                keys.push(k);
+            }
+        }
+        return keys;
+    };
+
+    //// exported async module functions ////
+
+    //// nextTick implementation with browser-compatible fallback ////
+    if (typeof process === 'undefined' || !(process.nextTick)) {
+        if (typeof setImmediate === 'function') {
+            async.nextTick = function (fn) {
+                // not a direct alias for IE10 compatibility
+                setImmediate(fn);
+            };
+            async.setImmediate = async.nextTick;
+        }
+        else {
+            async.nextTick = function (fn) {
+                setTimeout(fn, 0);
+            };
+            async.setImmediate = async.nextTick;
+        }
+    }
+    else {
+        async.nextTick = process.nextTick;
+        if (typeof setImmediate !== 'undefined') {
+            async.setImmediate = function (fn) {
+              // not a direct alias for IE10 compatibility
+              setImmediate(fn);
+            };
+        }
+        else {
+            async.setImmediate = async.nextTick;
+        }
+    }
+
+    async.each = function (arr, iterator, callback) {
+        callback = callback || function () {};
+        if (!arr.length) {
+            return callback();
+        }
+        var completed = 0;
+        _each(arr, function (x) {
+            iterator(x, only_once(function (err) {
+                if (err) {
+                    callback(err);
+                    callback = function () {};
+                }
+                else {
+                    completed += 1;
+                    if (completed >= arr.length) {
+                        callback(null);
+                    }
+                }
+            }));
+        });
+    };
+    async.forEach = async.each;
+
+    async.eachSeries = function (arr, iterator, callback) {
+        callback = callback || function () {};
+        if (!arr.length) {
+            return callback();
+        }
+        var completed = 0;
+        var iterate = function () {
+            iterator(arr[completed], function (err) {
+                if (err) {
+                    callback(err);
+                    callback = function () {};
+                }
+                else {
+                    completed += 1;
+                    if (completed >= arr.length) {
+                        callback(null);
+                    }
+                    else {
+                        iterate();
+                    }
+                }
+            });
+        };
+        iterate();
+    };
+    async.forEachSeries = async.eachSeries;
+
+    async.eachLimit = function (arr, limit, iterator, callback) {
+        var fn = _eachLimit(limit);
+        fn.apply(null, [arr, iterator, callback]);
+    };
+    async.forEachLimit = async.eachLimit;
+
+    var _eachLimit = function (limit) {
+
+        return function (arr, iterator, callback) {
+            callback = callback || function () {};
+            if (!arr.length || limit <= 0) {
+                return callback();
+            }
+            var completed = 0;
+            var started = 0;
+            var running = 0;
+
+            (function replenish () {
+                if (completed >= arr.length) {
+                    return callback();
+                }
+
+                while (running < limit && started < arr.length) {
+                    started += 1;
+                    running += 1;
+                    iterator(arr[started - 1], function (err) {
+                        if (err) {
+                            callback(err);
+                            callback = function () {};
+                        }
+                        else {
+                            completed += 1;
+                            running -= 1;
+                            if (completed >= arr.length) {
+                                callback();
+                            }
+                            else {
+                                replenish();
+                            }
+                        }
+                    });
+                }
+            })();
+        };
+    };
+
+
+    var doParallel = function (fn) {
+        return function () {
+            var args = Array.prototype.slice.call(arguments);
+            return fn.apply(null, [async.each].concat(args));
+        };
+    };
+    var doParallelLimit = function(limit, fn) {
+        return function () {
+            var args = Array.prototype.slice.call(arguments);
+            return fn.apply(null, [_eachLimit(limit)].concat(args));
+        };
+    };
+    var doSeries = function (fn) {
+        return function () {
+            var args = Array.prototype.slice.call(arguments);
+            return fn.apply(null, [async.eachSeries].concat(args));
+        };
+    };
+
+
+    var _asyncMap = function (eachfn, arr, iterator, callback) {
+        var results = [];
+        arr = _map(arr, function (x, i) {
+            return {index: i, value: x};
+        });
+        eachfn(arr, function (x, callback) {
+            iterator(x.value, function (err, v) {
+                results[x.index] = v;
+                callback(err);
+            });
+        }, function (err) {
+            callback(err, results);
+        });
+    };
+    async.map = doParallel(_asyncMap);
+    async.mapSeries = doSeries(_asyncMap);
+    async.mapLimit = function (arr, limit, iterator, callback) {
+        return _mapLimit(limit)(arr, iterator, callback);
+    };
+
+    var _mapLimit = function(limit) {
+        return doParallelLimit(limit, _asyncMap);
+    };
+
+    // reduce only has a series version, as doing reduce in parallel won't
+    // work in many situations.
+    async.reduce = function (arr, memo, iterator, callback) {
+        async.eachSeries(arr, function (x, callback) {
+            iterator(memo, x, function (err, v) {
+                memo = v;
+                callback(err);
+            });
+        }, function (err) {
+            callback(err, memo);
+        });
+    };
+    // inject alias
+    async.inject = async.reduce;
+    // foldl alias
+    async.foldl = async.reduce;
+
+    async.reduceRight = function (arr, memo, iterator, callback) {
+        var reversed = _map(arr, function (x) {
+            return x;
+        }).reverse();
+        async.reduce(reversed, memo, iterator, callback);
+    };
+    // foldr alias
+    async.foldr = async.reduceRight;
+
+    var _filter = function (eachfn, arr, iterator, callback) {
+        var results = [];
+        arr = _map(arr, function (x, i) {
+            return {index: i, value: x};
+        });
+        eachfn(arr, function (x, callback) {
+            iterator(x.value, function (v) {
+                if (v) {
+                    results.push(x);
+                }
+                callback();
+            });
+        }, function (err) {
+            callback(_map(results.sort(function (a, b) {
+                return a.index - b.index;
+            }), function (x) {
+                return x.value;
+            }));
+        });
+    };
+    async.filter = doParallel(_filter);
+    async.filterSeries = doSeries(_filter);
+    // select alias
+    async.select = async.filter;
+    async.selectSeries = async.filterSeries;
+
+    var _reject = function (eachfn, arr, iterator, callback) {
+        var results = [];
+        arr = _map(arr, function (x, i) {
+            return {index: i, value: x};
+        });
+        eachfn(arr, function (x, callback) {
+            iterator(x.value, function (v) {
+                if (!v) {
+                    results.push(x);
+                }
+                callback();
+            });
+        }, function (err) {
+            callback(_map(results.sort(function (a, b) {
+                return a.index - b.index;
+            }), function (x) {
+                return x.value;
+            }));
+        });
+    };
+    async.reject = doParallel(_reject);
+    async.rejectSeries = doSeries(_reject);
+
+    var _detect = function (eachfn, arr, iterator, main_callback) {
+        eachfn(arr, function (x, callback) {
+            iterator(x, function (result) {
+                if (result) {
+                    main_callback(x);
+                    main_callback = function () {};
+                }
+                else {
+                    callback();
+                }
+            });
+        }, function (err) {
+            main_callback();
+        });
+    };
+    async.detect = doParallel(_detect);
+    async.detectSeries = doSeries(_detect);
+
+    async.some = function (arr, iterator, main_callback) {
+        async.each(arr, function (x, callback) {
+            iterator(x, function (v) {
+                if (v) {
+                    main_callback(true);
+                    main_callback = function () {};
+                }
+                callback();
+            });
+        }, function (err) {
+            main_callback(false);
+        });
+    };
+    // any alias
+    async.any = async.some;
+
+    async.every = function (arr, iterator, main_callback) {
+        async.each(arr, function (x, callback) {
+            iterator(x, function (v) {
+                if (!v) {
+                    main_callback(false);
+                    main_callback = function () {};
+                }
+                callback();
+            });
+        }, function (err) {
+            main_callback(true);
+        });
+    };
+    // all alias
+    async.all = async.every;
+
+    async.sortBy = function (arr, iterator, callback) {
+        async.map(arr, function (x, callback) {
+            iterator(x, function (err, criteria) {
+                if (err) {
+                    callback(err);
+                }
+                else {
+                    callback(null, {value: x, criteria: criteria});
+                }
+            });
+        }, function (err, results) {
+            if (err) {
+                return callback(err);
+            }
+            else {
+                var fn = function (left, right) {
+                    var a = left.criteria, b = right.criteria;
+                    return a < b ? -1 : a > b ? 1 : 0;
+                };
+                callback(null, _map(results.sort(fn), function (x) {
+                    return x.value;
+                }));
+            }
+        });
+    };
+
+    async.auto = function (tasks, callback) {
+        callback = callback || function () {};
+        var keys = _keys(tasks);
+        if (!keys.length) {
+            return callback(null);
+        }
+
+        var results = {};
+
+        var listeners = [];
+        var addListener = function (fn) {
+            listeners.unshift(fn);
+        };
+        var removeListener = function (fn) {
+            for (var i = 0; i < listeners.length; i += 1) {
+                if (listeners[i] === fn) {
+                    listeners.splice(i, 1);
+                    return;
+                }
+            }
+        };
+        var taskComplete = function () {
+            _each(listeners.slice(0), function (fn) {
+                fn();
+            });
+        };
+
+        addListener(function () {
+            if (_keys(results).length === keys.length) {
+                callback(null, results);
+                callback = function () {};
+            }
+        });
+
+        _each(keys, function (k) {
+            var task = (tasks[k] instanceof Function) ? [tasks[k]]: tasks[k];
+            var taskCallback = function (err) {
+                var args = Array.prototype.slice.call(arguments, 1);
+                if (args.length <= 1) {
+                    args = args[0];
+                }
+                if (err) {
+                    var safeResults = {};
+                    _each(_keys(results), function(rkey) {
+                        safeResults[rkey] = results[rkey];
+                    });
+                    safeResults[k] = args;
+                    callback(err, safeResults);
+                    // stop subsequent errors hitting callback multiple times
+                    callback = function () {};
+                }
+                else {
+                    results[k] = args;
+                    async.setImmediate(taskComplete);
+                }
+            };
+            var requires = task.slice(0, Math.abs(task.length - 1)) || [];
+            var ready = function () {
+                return _reduce(requires, function (a, x) {
+                    return (a && results.hasOwnProperty(x));
+                }, true) && !results.hasOwnProperty(k);
+            };
+            if (ready()) {
+                task[task.length - 1](taskCallback, results);
+            }
+            else {
+                var listener = function () {
+                    if (ready()) {
+                        removeListener(listener);
+                        task[task.length - 1](taskCallback, results);
+                    }
+                };
+                addListener(listener);
+            }
+        });
+    };
+
+    async.waterfall = function (tasks, callback) {
+        callback = callback || function () {};
+        if (tasks.constructor !== Array) {
+          var err = new Error('First argument to waterfall must be an array of functions');
+          return callback(err);
+        }
+        if (!tasks.length) {
+            return callback();
+        }
+        var wrapIterator = function (iterator) {
+            return function (err) {
+                if (err) {
+                    callback.apply(null, arguments);
+                    callback = function () {};
+                }
+                else {
+                    var args = Array.prototype.slice.call(arguments, 1);
+                    var next = iterator.next();
+                    if (next) {
+                        args.push(wrapIterator(next));
+                    }
+                    else {
+                        args.push(callback);
+                    }
+                    async.setImmediate(function () {
+                        iterator.apply(null, args);
+                    });
+                }
+            };
+        };
+        wrapIterator(async.iterator(tasks))();
+    };
+
+    var _parallel = function(eachfn, tasks, callback) {
+        callback = callback || function () {};
+        if (tasks.constructor === Array) {
+            eachfn.map(tasks, function (fn, callback) {
+                if (fn) {
+                    fn(function (err) {
+                        var args = Array.prototype.slice.call(arguments, 1);
+                        if (args.length <= 1) {
+                            args = args[0];
+                        }
+                        callback.call(null, err, args);
+                    });
+                }
+            }, callback);
+        }
+        else {
+            var results = {};
+            eachfn.each(_keys(tasks), function (k, callback) {
+                tasks[k](function (err) {
+                    var args = Array.prototype.slice.call(arguments, 1);
+                    if (args.length <= 1) {
+                        args = args[0];
+                    }
+                    results[k] = args;
+                    callback(err);
+                });
+            }, function (err) {
+                callback(err, results);
+            });
+        }
+    };
+
+    async.parallel = function (tasks, callback) {
+        _parallel({ map: async.map, each: async.each }, tasks, callback);
+    };
+
+    async.parallelLimit = function(tasks, limit, callback) {
+        _parallel({ map: _mapLimit(limit), each: _eachLimit(limit) }, tasks, callback);
+    };
+
+    async.series = function (tasks, callback) {
+        callback = callback || function () {};
+        if (tasks.constructor === Array) {
+            async.mapSeries(tasks, function (fn, callback) {
+                if (fn) {
+                    fn(function (err) {
+                        var args = Array.prototype.slice.call(arguments, 1);
+                        if (args.length <= 1) {
+                            args = args[0];
+                        }
+                        callback.call(null, err, args);
+                    });
+                }
+            }, callback);
+        }
+        else {
+            var results = {};
+            async.eachSeries(_keys(tasks), function (k, callback) {
+                tasks[k](function (err) {
+                    var args = Array.prototype.slice.call(arguments, 1);
+                    if (args.length <= 1) {
+                        args = args[0];
+                    }
+                    results[k] = args;
+                    callback(err);
+                });
+            }, function (err) {
+                callback(err, results);
+            });
+        }
+    };
+
+    async.iterator = function (tasks) {
+        var makeCallback = function (index) {
+            var fn = function () {
+                if (tasks.length) {
+                    tasks[index].apply(null, arguments);
+                }
+                return fn.next();
+            };
+            fn.next = function () {
+                return (index < tasks.length - 1) ? makeCallback(index + 1): null;
+            };
+            return fn;
+        };
+        return makeCallback(0);
+    };
+
+    async.apply = function (fn) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        return function () {
+            return fn.apply(
+                null, args.concat(Array.prototype.slice.call(arguments))
+            );
+        };
+    };
+
+    var _concat = function (eachfn, arr, fn, callback) {
+        var r = [];
+        eachfn(arr, function (x, cb) {
+            fn(x, function (err, y) {
+                r = r.concat(y || []);
+                cb(err);
+            });
+        }, function (err) {
+            callback(err, r);
+        });
+    };
+    async.concat = doParallel(_concat);
+    async.concatSeries = doSeries(_concat);
+
+    async.whilst = function (test, iterator, callback) {
+        if (test()) {
+            iterator(function (err) {
+                if (err) {
+                    return callback(err);
+                }
+                async.whilst(test, iterator, callback);
+            });
+        }
+        else {
+            callback();
+        }
+    };
+
+    async.doWhilst = function (iterator, test, callback) {
+        iterator(function (err) {
+            if (err) {
+                return callback(err);
+            }
+            if (test()) {
+                async.doWhilst(iterator, test, callback);
+            }
+            else {
+                callback();
+            }
+        });
+    };
+
+    async.until = function (test, iterator, callback) {
+        if (!test()) {
+            iterator(function (err) {
+                if (err) {
+                    return callback(err);
+                }
+                async.until(test, iterator, callback);
+            });
+        }
+        else {
+            callback();
+        }
+    };
+
+    async.doUntil = function (iterator, test, callback) {
+        iterator(function (err) {
+            if (err) {
+                return callback(err);
+            }
+            if (!test()) {
+                async.doUntil(iterator, test, callback);
+            }
+            else {
+                callback();
+            }
+        });
+    };
+
+    async.queue = function (worker, concurrency) {
+        if (concurrency === undefined) {
+            concurrency = 1;
+        }
+        function _insert(q, data, pos, callback) {
+          if(data.constructor !== Array) {
+              data = [data];
+          }
+          _each(data, function(task) {
+              var item = {
+                  data: task,
+                  callback: typeof callback === 'function' ? callback : null
+              };
+
+              if (pos) {
+                q.tasks.unshift(item);
+              } else {
+                q.tasks.push(item);
+              }
+
+              if (q.saturated && q.tasks.length === concurrency) {
+                  q.saturated();
+              }
+              async.setImmediate(q.process);
+          });
+        }
+
+        var workers = 0;
+        var q = {
+            tasks: [],
+            concurrency: concurrency,
+            saturated: null,
+            empty: null,
+            drain: null,
+            push: function (data, callback) {
+              _insert(q, data, false, callback);
+            },
+            unshift: function (data, callback) {
+              _insert(q, data, true, callback);
+            },
+            process: function () {
+                if (workers < q.concurrency && q.tasks.length) {
+                    var task = q.tasks.shift();
+                    if (q.empty && q.tasks.length === 0) {
+                        q.empty();
+                    }
+                    workers += 1;
+                    var next = function () {
+                        workers -= 1;
+                        if (task.callback) {
+                            task.callback.apply(task, arguments);
+                        }
+                        if (q.drain && q.tasks.length + workers === 0) {
+                            q.drain();
+                        }
+                        q.process();
+                    };
+                    var cb = only_once(next);
+                    worker(task.data, cb);
+                }
+            },
+            length: function () {
+                return q.tasks.length;
+            },
+            running: function () {
+                return workers;
+            }
+        };
+        return q;
+    };
+
+    async.cargo = function (worker, payload) {
+        var working     = false,
+            tasks       = [];
+
+        var cargo = {
+            tasks: tasks,
+            payload: payload,
+            saturated: null,
+            empty: null,
+            drain: null,
+            push: function (data, callback) {
+                if(data.constructor !== Array) {
+                    data = [data];
+                }
+                _each(data, function(task) {
+                    tasks.push({
+                        data: task,
+                        callback: typeof callback === 'function' ? callback : null
+                    });
+                    if (cargo.saturated && tasks.length === payload) {
+                        cargo.saturated();
+                    }
+                });
+                async.setImmediate(cargo.process);
+            },
+            process: function process() {
+                if (working) return;
+                if (tasks.length === 0) {
+                    if(cargo.drain) cargo.drain();
+                    return;
+                }
+
+                var ts = typeof payload === 'number'
+                            ? tasks.splice(0, payload)
+                            : tasks.splice(0);
+
+                var ds = _map(ts, function (task) {
+                    return task.data;
+                });
+
+                if(cargo.empty) cargo.empty();
+                working = true;
+                worker(ds, function () {
+                    working = false;
+
+                    var args = arguments;
+                    _each(ts, function (data) {
+                        if (data.callback) {
+                            data.callback.apply(null, args);
+                        }
+                    });
+
+                    process();
+                });
+            },
+            length: function () {
+                return tasks.length;
+            },
+            running: function () {
+                return working;
+            }
+        };
+        return cargo;
+    };
+
+    var _console_fn = function (name) {
+        return function (fn) {
+            var args = Array.prototype.slice.call(arguments, 1);
+            fn.apply(null, args.concat([function (err) {
+                var args = Array.prototype.slice.call(arguments, 1);
+                if (typeof console !== 'undefined') {
+                    if (err) {
+                        if (console.error) {
+                            console.error(err);
+                        }
+                    }
+                    else if (console[name]) {
+                        _each(args, function (x) {
+                            console[name](x);
+                        });
+                    }
+                }
+            }]));
+        };
+    };
+    async.log = _console_fn('log');
+    async.dir = _console_fn('dir');
+    /*async.info = _console_fn('info');
+    async.warn = _console_fn('warn');
+    async.error = _console_fn('error');*/
+
+    async.memoize = function (fn, hasher) {
+        var memo = {};
+        var queues = {};
+        hasher = hasher || function (x) {
+            return x;
+        };
+        var memoized = function () {
+            var args = Array.prototype.slice.call(arguments);
+            var callback = args.pop();
+            var key = hasher.apply(null, args);
+            if (key in memo) {
+                callback.apply(null, memo[key]);
+            }
+            else if (key in queues) {
+                queues[key].push(callback);
+            }
+            else {
+                queues[key] = [callback];
+                fn.apply(null, args.concat([function () {
+                    memo[key] = arguments;
+                    var q = queues[key];
+                    delete queues[key];
+                    for (var i = 0, l = q.length; i < l; i++) {
+                      q[i].apply(null, arguments);
+                    }
+                }]));
+            }
+        };
+        memoized.memo = memo;
+        memoized.unmemoized = fn;
+        return memoized;
+    };
+
+    async.unmemoize = function (fn) {
+      return function () {
+        return (fn.unmemoized || fn).apply(null, arguments);
+      };
+    };
+
+    async.times = function (count, iterator, callback) {
+        var counter = [];
+        for (var i = 0; i < count; i++) {
+            counter.push(i);
+        }
+        return async.map(counter, iterator, callback);
+    };
+
+    async.timesSeries = function (count, iterator, callback) {
+        var counter = [];
+        for (var i = 0; i < count; i++) {
+            counter.push(i);
+        }
+        return async.mapSeries(counter, iterator, callback);
+    };
+
+    async.compose = function (/* functions... */) {
+        var fns = Array.prototype.reverse.call(arguments);
+        return function () {
+            var that = this;
+            var args = Array.prototype.slice.call(arguments);
+            var callback = args.pop();
+            async.reduce(fns, args, function (newargs, fn, cb) {
+                fn.apply(that, newargs.concat([function () {
+                    var err = arguments[0];
+                    var nextargs = Array.prototype.slice.call(arguments, 1);
+                    cb(err, nextargs);
+                }]))
+            },
+            function (err, results) {
+                callback.apply(that, [err].concat(results));
+            });
+        };
+    };
+
+    var _applyEach = function (eachfn, fns /*args...*/) {
+        var go = function () {
+            var that = this;
+            var args = Array.prototype.slice.call(arguments);
+            var callback = args.pop();
+            return eachfn(fns, function (fn, cb) {
+                fn.apply(that, args.concat([cb]));
+            },
+            callback);
+        };
+        if (arguments.length > 2) {
+            var args = Array.prototype.slice.call(arguments, 2);
+            return go.apply(this, args);
+        }
+        else {
+            return go;
+        }
+    };
+    async.applyEach = doParallel(_applyEach);
+    async.applyEachSeries = doSeries(_applyEach);
+
+    async.forever = function (fn, callback) {
+        function next(err) {
+            if (err) {
+                if (callback) {
+                    return callback(err);
+                }
+                throw err;
+            }
+            fn(next);
+        }
+        next();
+    };
+
+    // AMD / RequireJS
+    if (typeof define !== 'undefined' && define.amd) {
+        define([], function () {
+            return async;
+        });
+    }
+    // Node.js
+    else if (typeof module !== 'undefined' && module.exports) {
+        module.exports = async;
+    }
+    // included directly via <script> tag
+    else {
+        root.async = async;
+    }
+
+}());
+
+}).call(this,require('_process'))
+},{"_process":172}],203:[function(require,module,exports){
+(function(undefined) {
+  var async, 
+      root = this;
+
+  if (typeof module !== 'undefined' && module.exports) {
+    async = require('async');
+  } else {
+    if (root.async) {
+      async = root.async;
+    } else {
+      throw 'Naan requires the "async" module. Get it from ' +
+            'https://github.com/caolan/async.git';
+    }
+  }
+
+  var bound = (function() {
+    var naan = {};
+    // context: the context to bind fn to
+    // fn: the function to curry
+    // args: the args to create a curry with
+    // position: if (true|false) - true = curry args at the start of the arg list
+    //                           - false = curry args at the end of the arg list
+    //           if numeric, indicates the location in the args list to insert the
+    //             args. if this position is great than the length of the passed args,
+    //             then the args are added at the end
+    function curry(context, fn, curryArgs, pos) {
+      var garnisher = garnish.prepare(curryArgs, pos);
+      function kitchen(fn) {
+        return function curriedFunction() {
+          return fn.apply(context || this, garnisher(arguments));
+        };
+      }
+
+      return Array.isArray(fn) ? fn.map(kitchen) : kitchen(fn);
+    }
+
+    // This creates a curried function which asynchronously resolves the arguments 
+    // by calling the `ingredients` functions before `fn` is called.
+    //
+    // fn               The function to curry. 
+    //
+    // ingredients      The function(s) to resolve before calling `fn`. These must
+    //                  be of the signature `function(callback) {}`. The callback
+    //                  takes 2 arguments, the first being `err`, and the second 
+    //                  being parameter that will be passed to `fn` (its position
+    //                  depends on `recipe`, otherwise it will be inserted at the
+    //                  start of the parameter list). 
+    //
+    //                  If `err` is not falsy, `fn`'s callback will be called with
+    //                  that object rather than `fn`.
+    //
+    // recipe           Optional. The locations in the parameter list to insert the
+    //                  results from the ingredients. Valid values are true, false,
+    //                  a number, or an array of numbers the same size as
+    //                  ingredients. See the `curry` docs for details.
+    //
+    // callbackPosition Optional. The location in the parameter list of the
+    //                  `fn`'s callback after the values from the cooked
+    //                  ingredients are added. If this is falsy or negative, it
+    //                  assumes the last parameter in the list. If null or false, it
+    //                  indicates `fn` doesn't know about the callback so `cook`
+    //                  should call it manually. If false, it indicates that
+    //                  callback should /not/ be passed to `fn`. If you specify this
+    //                  parameter you must specify `recipe` aswell.
+    //
+    // noParallel       Optional. If set to true, the `ingredients` functions are
+    //                  run in series, rather than parallel. If you specify this
+    //                  parameter you must specify `recipe` & `callbackPosition`
+    //                  as well.
+    naan.cook =
+    function cook(context, fn, ingredients, recipe, callbackPosition, noParallel) {
+      var oven = noParallel ? async.series : async.parallel;
+      var originalCbPosition = callbackPosition;
+      if (!Array.isArray(ingredients)) {
+        ingredients = [ ingredients ];
+      }
+
+      return function() {
+        var smorgasbord = [].slice.call(arguments);
+
+        if (!callbackPosition || callbackPosition < 0) {
+          callbackPosition = smorgasbord.length - 1;
+        } else {
+          if (typeof recipe === 'number' && recipe < callbackPosition) {
+            callbackPosition--;
+          } else if (recipe === undefined || recipe === true) {
+            callbackPosition--;
+          } else {
+            for (var index in recipe) {
+              if (recipe[index] < callbackPosition) {
+                callbackPosition--;
+              }
+            }
+          }
+        }
+
+        var callback = smorgasbord[callbackPosition];
+        if (originalCbPosition === false) {
+          smorgasbord = [].concat(
+            smorgasbord.slice(0, callbackPosition),
+            smorgasbord.slice(callbackPosition + 1)
+          );
+        }
+
+        if (typeof callback !== 'function') {
+          return;
+        }
+
+        oven(ingredients, function(err, vegetables) {
+          if (err) {
+            callback(err);
+          } else {
+            var result = fn.apply(
+              context, 
+              garnish.prepare(vegetables, recipe)(smorgasbord)
+            );
+            if (originalCbPosition === false || originalCbPosition === null) {
+              callback(null, result);
+            }
+          }
+        });
+      };
+    }
+
+    function garnish(args, curryArgs, pos) {
+      var opargs = Array.prototype;
+      if (pos === undefined || pos === true || pos === 0 || pos < 0) {
+        opargs = curryArgs.concat(opargs.slice.call(args));
+      } else if (pos === false || args.length < pos) {
+        opargs = opargs.slice.call(args).concat(curryArgs);
+      } else if (Array.isArray(pos)) {
+        opargs = opargs.slice.call(args);
+
+        for (var index in pos) {
+          if (index >= curryArgs.length) {
+            break;
+          } else if (index == pos.length - 1 && curryArgs.length > pos.length) {
+            opargs.splice.apply(
+              opargs, 
+              [pos[index], 0].concat( curryArgs.slice(index) )
+            );
+          } else {
+            opargs.splice(pos[index], 0, curryArgs[index]);
+          }
+        }
+      } else {
+        opargs = [].concat(
+          opargs.slice.call(args, 0, pos),
+          curryArgs,
+          opargs.slice.call(args, pos)
+        );
+      }
+      return opargs;
+    }
+
+    garnish.prepare = function(curryArgs, pos) {
+      if (Array.isArray(pos)) {
+        var index = -1;
+        var sortable = curryArgs.map(function(val) {
+          return {
+            index: ++index >= pos.length ? pos[pos.length - 1] : pos[index],
+            value: val
+          };
+        })
+        sortable.sort(function(l, r) {
+          return l.index - r.index;
+        });
+        curryArgs = sortable.map(function(item) {
+          return item.value;
+        });
+        pos = pos.slice().sort();
+      }
+
+      return function(meal) {
+        return garnish(meal, curryArgs, pos);
+      };
+    }
+
+    naan.tupperware = naan.alwaysReturn = naan.wrap =
+    function tupperware(context, fn, val) {
+      return function() {
+        fn.apply(context, arguments);
+        return val;
+      }
+    }
+
+    naan.ltupperware = naan.lalwaysReturn = naan.lwrap =
+    function ltupperware(context, val, fn) {
+      return tupperware(context, fn, val);
+    }
+
+    naan.curry = naan.leftCurry = naan.lcurry =
+    function leftCurry(context, fn) {
+      return curry(context, fn, [].slice.call(arguments, 2));
+    }
+
+    naan.rightCurry = naan.rcurry =
+    function rightCurry(context, fn) {
+      return curry(context, fn, [].slice.call(arguments, 2), false);
+    }
+
+    naan.curryArgs = naan.leftCurryArgs = naan.lcurrya = naan.currya =
+    function curryArgs(context, fn, args) {
+      return curry(context, fn, args);
+    }
+
+    naan.rightCurryArgs = naan.rcurrya =
+    function rightCurryArgs(context, fn, args) {
+      return curry(context, fn, args, false);
+    }
+
+    naan.positionCurry = naan.ncurry = naan.pcurry =
+    function positionCurry(context, fn, args, pos) {
+      if (!Array.isArray(args)) {
+        args = [ args ];
+      }
+      return curry(context, fn, args, pos);
+    }
+
+    naan.entangleCurry = naan.ecurry = function() {
+      return curry.apply(this, Array.prototype.slice.call(arguments));
+    };
+
+
+    return naan;
+  })();
+
+  // "zomboCrock" because it doess absolutely everything you want. And that's
+  // why we don't expose it anywhere! Ok, ok, if you would like a real name, 
+  // `recursiveExtendCrock` would be suitable.
+  function zomboCrock(result, group, recurse, curryfn) {
+    var result = result || (Array.isArray(group) ? [] : {});
+    var curryargs = Array.prototype.slice.call(arguments, 4);
+
+    if (typeof curryfn !== 'function') {
+      curryargs.unshift(curryfn);
+      curryfn = naan.curry;
+    }
+
+    curryargs.unshift(null);
+    var memos = [], idx = 0;
+
+    for (var key in group) {
+      if ((idx = memos.indexOf(group[key])) !== -1) {
+        result[key] = memos[idx];
+      } else {
+        if (typeof group[key] === 'object' && recurse && group[key] != null) {
+          var recurseArgs = [ {}, group[key], true, curryfn ];
+          recurseArgs = recurseArgs.concat(curryargs.slice(1));
+          memos.push(result[key] = zomboCrock.apply(this, recurseArgs));
+        } else if (typeof group[key] !== 'function') {
+          result[key] = group[key];
+        } else {
+          curryargs[0] = group[key];
+          result[key] = curryfn.apply(this, curryargs);
+          memos.push(result[key]);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  // ub = "unbound". Creates a version of naan that doesn't require a context
+  // argument.
+  var ub = zomboCrock({}, bound, 0, bound.curry(this, bound.curry, null), null);
+
+  var extendCrock = ub.ncurry(zomboCrock, false, 2);
+  var crock = ub.curry(extendCrock, false);
+  ub.recursiveExtendCrock = ub.recursiveExtendGroupCurry = 
+    ub.ncurry(zomboCrock, true, 2);
+  ub.crock = ub.groupCurry = ub.group = ub.gcurry = crock; 
+  ub.extendCrock = ub.ecrock = ub.egroup = ub.egcurry = extendCrock;
+
+  ub.b = ub.bound = bound;
+
+  ub.extendCombine = ub.ecombine = function(base, target, args, fn) {
+    fn = fn || ub.curry;
+    var result = base || (Array.isArray(target) ? [] : {});
+    if (Array.isArray(target) && target.length !== args.length) {
+      return undefined;
+    }
+    for (var key in target) {
+      if (typeof args[key] === 'undefined') {
+        continue;
+      }
+      var cargs = [ target[key] ].concat(args[key]);
+      result[key] = fn.apply(this, cargs);
+    }
+    return result;
+  }
+  ub.combine = ub.curry(ub.ecombine, null);
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = ub;
+  } else {
+    root.naan = ub;
+  }
+})()
+
+},{"async":202}],204:[function(require,module,exports){
 // Copyright 2010-2012 Mikeal Rogers
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -38444,7 +41230,7 @@ Object.defineProperty(request, 'debug', {
   }
 })
 
-},{"./lib/cookies":198,"./lib/helpers":201,"./request":253,"util":192}],197:[function(require,module,exports){
+},{"./lib/cookies":206,"./lib/helpers":209,"./request":261,"util":192}],205:[function(require,module,exports){
 'use strict'
 
 var caseless = require('caseless')
@@ -38579,7 +41365,7 @@ Auth.prototype.response = function (method, path, headers) {
 
 exports.Auth = Auth
 
-},{"./helpers":201,"caseless":213,"node-uuid":240}],198:[function(require,module,exports){
+},{"./helpers":209,"caseless":221,"node-uuid":248}],206:[function(require,module,exports){
 'use strict'
 
 var tough = require('tough-cookie')
@@ -38620,7 +41406,7 @@ exports.jar = function(store) {
   return new RequestJar(store)
 }
 
-},{"tough-cookie":248}],199:[function(require,module,exports){
+},{"tough-cookie":256}],207:[function(require,module,exports){
 'use strict'
 
 module.exports =
@@ -38632,7 +41418,7 @@ function copy (obj) {
   return o
 }
 
-},{}],200:[function(require,module,exports){
+},{}],208:[function(require,module,exports){
 (function (process){
 'use strict'
 
@@ -38715,7 +41501,7 @@ function getProxyFromURI(uri) {
 module.exports = getProxyFromURI
 
 }).call(this,require('_process'))
-},{"_process":172}],201:[function(require,module,exports){
+},{"_process":172}],209:[function(require,module,exports){
 (function (process,Buffer){
 'use strict'
 
@@ -38808,7 +41594,7 @@ exports.toBase64              = toBase64
 exports.defer                 = deferMethod()
 
 }).call(this,require('_process'),require("buffer").Buffer)
-},{"_process":172,"buffer":23,"crypto":27,"json-stringify-safe":236,"util":192}],202:[function(require,module,exports){
+},{"_process":172,"buffer":23,"crypto":27,"json-stringify-safe":244,"util":192}],210:[function(require,module,exports){
 'use strict'
 
 var querystring = require('querystring')
@@ -38931,7 +41717,7 @@ exports.oauth = function (args) {
   return {oauth:data, transport:transport}
 }
 
-},{"caseless":213,"node-uuid":240,"oauth-sign":241,"qs":242,"querystring":176}],203:[function(require,module,exports){
+},{"caseless":221,"node-uuid":248,"oauth-sign":249,"qs":250,"querystring":176}],211:[function(require,module,exports){
 
 /*!
  * knox - auth
@@ -39135,7 +41921,7 @@ function canonicalizeResource (resource) {
 }
 module.exports.canonicalizeResource = canonicalizeResource
 
-},{"crypto":27,"url":190}],204:[function(require,module,exports){
+},{"crypto":27,"url":190}],212:[function(require,module,exports){
 (function (Buffer){
 var DuplexStream = require('readable-stream/duplex')
   , util         = require('util')
@@ -39355,23 +42141,23 @@ BufferList.prototype.destroy = function () {
 module.exports = BufferList
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":23,"readable-stream/duplex":205,"util":192}],205:[function(require,module,exports){
+},{"buffer":23,"readable-stream/duplex":213,"util":192}],213:[function(require,module,exports){
 arguments[4][177][0].apply(exports,arguments)
-},{"./lib/_stream_duplex.js":206,"dup":177}],206:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":214,"dup":177}],214:[function(require,module,exports){
 arguments[4][178][0].apply(exports,arguments)
-},{"./_stream_readable":207,"./_stream_writable":208,"_process":172,"core-util-is":209,"dup":178,"inherits":210}],207:[function(require,module,exports){
+},{"./_stream_readable":215,"./_stream_writable":216,"_process":172,"core-util-is":217,"dup":178,"inherits":218}],215:[function(require,module,exports){
 arguments[4][180][0].apply(exports,arguments)
-},{"_process":172,"buffer":23,"core-util-is":209,"dup":180,"events":163,"inherits":210,"isarray":211,"stream":188,"string_decoder/":212}],208:[function(require,module,exports){
+},{"_process":172,"buffer":23,"core-util-is":217,"dup":180,"events":163,"inherits":218,"isarray":219,"stream":188,"string_decoder/":220}],216:[function(require,module,exports){
 arguments[4][182][0].apply(exports,arguments)
-},{"./_stream_duplex":206,"_process":172,"buffer":23,"core-util-is":209,"dup":182,"inherits":210,"stream":188}],209:[function(require,module,exports){
+},{"./_stream_duplex":214,"_process":172,"buffer":23,"core-util-is":217,"dup":182,"inherits":218,"stream":188}],217:[function(require,module,exports){
 arguments[4][183][0].apply(exports,arguments)
-},{"buffer":23,"dup":183}],210:[function(require,module,exports){
+},{"buffer":23,"dup":183}],218:[function(require,module,exports){
 arguments[4][169][0].apply(exports,arguments)
-},{"dup":169}],211:[function(require,module,exports){
+},{"dup":169}],219:[function(require,module,exports){
 arguments[4][170][0].apply(exports,arguments)
-},{"dup":170}],212:[function(require,module,exports){
+},{"dup":170}],220:[function(require,module,exports){
 arguments[4][189][0].apply(exports,arguments)
-},{"buffer":23,"dup":189}],213:[function(require,module,exports){
+},{"buffer":23,"dup":189}],221:[function(require,module,exports){
 function Caseless (dict) {
   this.dict = dict || {}
 }
@@ -39438,7 +42224,7 @@ module.exports.httpify = function (resp, headers) {
   return c
 }
 
-},{}],214:[function(require,module,exports){
+},{}],222:[function(require,module,exports){
 (function (Buffer){
 var util = require('util');
 var Stream = require('stream').Stream;
@@ -39630,7 +42416,7 @@ CombinedStream.prototype._emitError = function(err) {
 };
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":23,"delayed-stream":215,"stream":188,"util":192}],215:[function(require,module,exports){
+},{"buffer":23,"delayed-stream":223,"stream":188,"util":192}],223:[function(require,module,exports){
 var Stream = require('stream').Stream;
 var util = require('util');
 
@@ -39731,7 +42517,7 @@ DelayedStream.prototype._checkIfMaxDataSizeExceeded = function() {
   this.emit('error', new Error(message));
 };
 
-},{"stream":188,"util":192}],216:[function(require,module,exports){
+},{"stream":188,"util":192}],224:[function(require,module,exports){
 module.exports = ForeverAgent
 ForeverAgent.SSL = ForeverAgentSSL
 
@@ -39852,7 +42638,7 @@ function createConnectionSSL (port, host, options) {
   return tls.connect(options);
 }
 
-},{"http":164,"https":168,"net":8,"tls":8,"util":192}],217:[function(require,module,exports){
+},{"http":164,"https":168,"net":8,"tls":8,"util":192}],225:[function(require,module,exports){
 (function (process,Buffer){
 var CombinedStream = require('combined-stream');
 var util = require('util');
@@ -40207,7 +42993,7 @@ function populate(dst, src) {
 }
 
 }).call(this,require('_process'),require("buffer").Buffer)
-},{"_process":172,"async":218,"buffer":23,"combined-stream":214,"fs":8,"http":164,"https":168,"mime-types":237,"path":171,"url":190,"util":192}],218:[function(require,module,exports){
+},{"_process":172,"async":226,"buffer":23,"combined-stream":222,"fs":8,"http":164,"https":168,"mime-types":245,"path":171,"url":190,"util":192}],226:[function(require,module,exports){
 (function (process){
 /*!
  * async
@@ -41334,7 +44120,7 @@ function populate(dst, src) {
 }());
 
 }).call(this,require('_process'))
-},{"_process":172}],219:[function(require,module,exports){
+},{"_process":172}],227:[function(require,module,exports){
 /*
     HTTP Hawk Authentication Scheme
     Copyright (c) 2012-2014, Eran Hammer <eran@hammer.io>
@@ -41977,7 +44763,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
 // $lab:coverage:on$
 
-},{}],220:[function(require,module,exports){
+},{}],228:[function(require,module,exports){
 // Copyright 2011 Joyent, Inc.  All rights reserved.
 
 var parser = require('./parser');
@@ -42005,7 +44791,7 @@ module.exports = {
   verifySignature: verify.verifySignature
 };
 
-},{"./parser":221,"./signer":222,"./util":223,"./verify":224}],221:[function(require,module,exports){
+},{"./parser":229,"./signer":230,"./util":231,"./verify":232}],229:[function(require,module,exports){
 // Copyright 2012 Joyent, Inc.  All rights reserved.
 
 var assert = require('assert-plus');
@@ -42311,7 +45097,7 @@ module.exports = {
 
 };
 
-},{"assert-plus":231,"util":192}],222:[function(require,module,exports){
+},{"assert-plus":239,"util":192}],230:[function(require,module,exports){
 // Copyright 2012 Joyent, Inc.  All rights reserved.
 
 var assert = require('assert-plus');
@@ -42491,7 +45277,7 @@ module.exports = {
 
 };
 
-},{"assert-plus":231,"crypto":27,"http":164,"util":192}],223:[function(require,module,exports){
+},{"assert-plus":239,"crypto":27,"http":164,"util":192}],231:[function(require,module,exports){
 (function (Buffer){
 // Copyright 2012 Joyent, Inc.  All rights reserved.
 
@@ -42799,7 +45585,7 @@ module.exports = {
 };
 
 }).call(this,require("buffer").Buffer)
-},{"asn1":230,"assert-plus":231,"buffer":23,"crypto":27,"ctype":234}],224:[function(require,module,exports){
+},{"asn1":238,"assert-plus":239,"buffer":23,"crypto":27,"ctype":242}],232:[function(require,module,exports){
 // Copyright 2011 Joyent, Inc.  All rights reserved.
 
 var assert = require('assert-plus');
@@ -42843,7 +45629,7 @@ module.exports = {
 
 };
 
-},{"assert-plus":231,"crypto":27}],225:[function(require,module,exports){
+},{"assert-plus":239,"crypto":27}],233:[function(require,module,exports){
 // Copyright 2011 Mark Cavage <mcavage@gmail.com> All rights reserved.
 
 
@@ -42858,7 +45644,7 @@ module.exports = {
 
 };
 
-},{}],226:[function(require,module,exports){
+},{}],234:[function(require,module,exports){
 // Copyright 2011 Mark Cavage <mcavage@gmail.com> All rights reserved.
 
 var errors = require('./errors');
@@ -42887,7 +45673,7 @@ for (var e in errors) {
     module.exports[e] = errors[e];
 }
 
-},{"./errors":225,"./reader":227,"./types":228,"./writer":229}],227:[function(require,module,exports){
+},{"./errors":233,"./reader":235,"./types":236,"./writer":237}],235:[function(require,module,exports){
 (function (Buffer){
 // Copyright 2011 Mark Cavage <mcavage@gmail.com> All rights reserved.
 
@@ -43158,7 +45944,7 @@ Reader.prototype._readTag = function(tag) {
 module.exports = Reader;
 
 }).call(this,require("buffer").Buffer)
-},{"./errors":225,"./types":228,"assert":9,"buffer":23}],228:[function(require,module,exports){
+},{"./errors":233,"./types":236,"assert":9,"buffer":23}],236:[function(require,module,exports){
 // Copyright 2011 Mark Cavage <mcavage@gmail.com> All rights reserved.
 
 
@@ -43196,7 +45982,7 @@ module.exports = {
   Context: 128
 };
 
-},{}],229:[function(require,module,exports){
+},{}],237:[function(require,module,exports){
 (function (Buffer){
 // Copyright 2011 Mark Cavage <mcavage@gmail.com> All rights reserved.
 
@@ -43517,7 +46303,7 @@ Writer.prototype._ensure = function(len) {
 module.exports = Writer;
 
 }).call(this,require("buffer").Buffer)
-},{"./errors":225,"./types":228,"assert":9,"buffer":23}],230:[function(require,module,exports){
+},{"./errors":233,"./types":236,"assert":9,"buffer":23}],238:[function(require,module,exports){
 // Copyright 2011 Mark Cavage <mcavage@gmail.com> All rights reserved.
 
 // If you have no idea what ASN.1 or BER is, see this:
@@ -43539,7 +46325,7 @@ module.exports = {
 
 };
 
-},{"./ber/index":226}],231:[function(require,module,exports){
+},{"./ber/index":234}],239:[function(require,module,exports){
 (function (process,Buffer){
 // Copyright (c) 2012, Mark Cavage. All rights reserved.
 
@@ -43788,7 +46574,7 @@ Object.keys(assert).forEach(function (k) {
 });
 
 }).call(this,require('_process'),require("buffer").Buffer)
-},{"_process":172,"assert":9,"buffer":23,"stream":188,"util":192}],232:[function(require,module,exports){
+},{"_process":172,"assert":9,"buffer":23,"stream":188,"util":192}],240:[function(require,module,exports){
 /*
  * ctf.js
  *
@@ -44035,7 +46821,7 @@ function ctfParseJson(json, ctype)
 
 exports.ctfParseJson = ctfParseJson;
 
-},{"assert":9}],233:[function(require,module,exports){
+},{"assert":9}],241:[function(require,module,exports){
 /*
  * rm - Feb 2011
  * ctio.js:
@@ -45522,7 +48308,7 @@ exports.rdouble = rdouble;
 exports.wfloat = wfloat;
 exports.wdouble = wdouble;
 
-},{"assert":9}],234:[function(require,module,exports){
+},{"assert":9}],242:[function(require,module,exports){
 (function (Buffer){
 /*
  * rm - Feb 2011
@@ -46470,7 +49256,7 @@ exports.wfloat = mod_ctio.wfloat;
 exports.wdouble = mod_ctio.wdouble;
 
 }).call(this,require("buffer").Buffer)
-},{"./ctf.js":232,"./ctio.js":233,"assert":9,"buffer":23}],235:[function(require,module,exports){
+},{"./ctf.js":240,"./ctio.js":241,"assert":9,"buffer":23}],243:[function(require,module,exports){
 var stream = require('stream')
 
 
@@ -46499,7 +49285,7 @@ module.exports.isReadable = isReadable
 module.exports.isWritable = isWritable
 module.exports.isDuplex   = isDuplex
 
-},{"stream":188}],236:[function(require,module,exports){
+},{"stream":188}],244:[function(require,module,exports){
 module.exports = stringify;
 
 function getSerialize (fn, decycle) {
@@ -46540,7 +49326,7 @@ function stringify(obj, fn, spaces, decycle) {
 
 stringify.getSerialize = getSerialize;
 
-},{}],237:[function(require,module,exports){
+},{}],245:[function(require,module,exports){
 
 var db = require('mime-db')
 
@@ -46605,7 +49391,7 @@ exports.contentType = function (type) {
   return type
 }
 
-},{"mime-db":239}],238:[function(require,module,exports){
+},{"mime-db":247}],246:[function(require,module,exports){
 module.exports={
   "application/1d-interleaved-parityfec": {
     "source": "iana"
@@ -52906,7 +55692,7 @@ module.exports={
   }
 }
 
-},{}],239:[function(require,module,exports){
+},{}],247:[function(require,module,exports){
 /*!
  * mime-db
  * Copyright(c) 2014 Jonathan Ong
@@ -52919,7 +55705,7 @@ module.exports={
 
 module.exports = require('./db.json')
 
-},{"./db.json":238}],240:[function(require,module,exports){
+},{"./db.json":246}],248:[function(require,module,exports){
 //     uuid.js
 //
 //     Copyright (c) 2010-2012 Robert Kieffer
@@ -53166,7 +55952,7 @@ module.exports = require('./db.json')
   }
 }).call(this);
 
-},{}],241:[function(require,module,exports){
+},{}],249:[function(require,module,exports){
 var crypto = require('crypto')
   , qs = require('querystring')
   ;
@@ -53299,10 +56085,10 @@ exports.plaintext = plaintext
 exports.sign = sign
 exports.rfc3986 = rfc3986
 
-},{"crypto":27,"querystring":176}],242:[function(require,module,exports){
+},{"crypto":27,"querystring":176}],250:[function(require,module,exports){
 module.exports = require('./lib/');
 
-},{"./lib/":243}],243:[function(require,module,exports){
+},{"./lib/":251}],251:[function(require,module,exports){
 // Load modules
 
 var Stringify = require('./stringify');
@@ -53319,7 +56105,7 @@ module.exports = {
     parse: Parse
 };
 
-},{"./parse":244,"./stringify":245}],244:[function(require,module,exports){
+},{"./parse":252,"./stringify":253}],252:[function(require,module,exports){
 // Load modules
 
 var Utils = require('./utils');
@@ -53478,7 +56264,7 @@ module.exports = function (str, options) {
     return Utils.compact(obj);
 };
 
-},{"./utils":246}],245:[function(require,module,exports){
+},{"./utils":254}],253:[function(require,module,exports){
 // Load modules
 
 var Utils = require('./utils');
@@ -53557,7 +56343,7 @@ module.exports = function (obj, options) {
     return keys.join(delimiter);
 };
 
-},{"./utils":246}],246:[function(require,module,exports){
+},{"./utils":254}],254:[function(require,module,exports){
 // Load modules
 
 
@@ -53691,7 +56477,7 @@ exports.isBuffer = function (obj) {
         obj.constructor.isBuffer(obj));
 };
 
-},{}],247:[function(require,module,exports){
+},{}],255:[function(require,module,exports){
 (function (Buffer){
 var util = require('util')
 var Stream = require('stream')
@@ -53797,7 +56583,7 @@ function alignedWrite(buffer) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":23,"stream":188,"string_decoder":189,"util":192}],248:[function(require,module,exports){
+},{"buffer":23,"stream":188,"string_decoder":189,"util":192}],256:[function(require,module,exports){
 /*
  * Copyright GoInstant, Inc. and other contributors. All rights reserved.
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -54906,7 +57692,7 @@ module.exports = {
   canonicalDomain: canonicalDomain,
 };
 
-},{"./memstore":249,"./pubsuffix":250,"./store":251,"net":8,"punycode":173,"url":190}],249:[function(require,module,exports){
+},{"./memstore":257,"./pubsuffix":258,"./store":259,"net":8,"punycode":173,"url":190}],257:[function(require,module,exports){
 'use strict';
 var tough = require('./cookie');
 var Store = require('./store').Store;
@@ -55031,7 +57817,7 @@ MemoryCookieStore.prototype.removeCookies = function removeCookies(domain, path,
   return cb(null);
 };
 
-},{"./cookie":248,"./store":251,"util":192}],250:[function(require,module,exports){
+},{"./cookie":256,"./store":259,"util":192}],258:[function(require,module,exports){
 /****************************************************
  * AUTOMATICALLY GENERATED by generate-pubsuffix.js *
  *                  DO NOT EDIT!                    *
@@ -55102,7 +57888,7 @@ var index = module.exports.index = Object.freeze(
 
 // END of automatically generated file
 
-},{}],251:[function(require,module,exports){
+},{}],259:[function(require,module,exports){
 'use strict';
 /*jshint unused:false */
 
@@ -55141,7 +57927,7 @@ Store.prototype.removeCookies = function removeCookies(domain, path, cb) {
   throw new Error('removeCookies is not implemented');
 };
 
-},{}],252:[function(require,module,exports){
+},{}],260:[function(require,module,exports){
 (function (process,Buffer){
 'use strict'
 
@@ -55381,7 +58167,7 @@ if (process.env.NODE_DEBUG && /\btunnel\b/.test(process.env.NODE_DEBUG)) {
 exports.debug = debug // for test
 
 }).call(this,require('_process'),require("buffer").Buffer)
-},{"_process":172,"assert":9,"buffer":23,"events":163,"http":164,"https":168,"net":8,"tls":8,"util":192}],253:[function(require,module,exports){
+},{"_process":172,"assert":9,"buffer":23,"events":163,"http":164,"https":168,"net":8,"tls":8,"util":192}],261:[function(require,module,exports){
 (function (process,Buffer){
 'use strict'
 
@@ -57058,2914 +59844,7 @@ Request.prototype.toJSON = requestToJSON
 module.exports = Request
 
 }).call(this,require('_process'),require("buffer").Buffer)
-},{"./lib/auth":197,"./lib/cookies":198,"./lib/copy":199,"./lib/getProxyFromURI":200,"./lib/helpers":201,"./lib/oauth":202,"_process":172,"aws-sign2":203,"bl":204,"buffer":23,"caseless":213,"combined-stream":214,"forever-agent":216,"form-data":217,"hawk":219,"http":164,"http-signature":220,"https":168,"isstream":235,"mime-types":237,"net":8,"node-uuid":240,"qs":242,"querystring":176,"stream":188,"stringstream":247,"tunnel-agent":252,"url":190,"util":192,"zlib":22}],254:[function(require,module,exports){
-var async = require('async');
-var naan = require('naan');
-var _ = require('underscore');
-var util = require('util');
-
-exports.uniqueness = {};
-
-exports.uniqueness.create = function(label, keys, callback) {
-  if (!Array.isArray(keys)) keys = [keys];
-
-  label = encodeURIComponent(label);
-  var body = { property_keys: keys };
-
-  var endpoint = util.format('schema/constraint/%s/uniqueness', label);
-  var op = this.operation(endpoint, 'POST', body);
-  this.call(op, function(err, index) {
-    if (err) callback(err);
-    else callback(null, index);
-  });
-};
-
-exports.uniqueness.createIfNone = function(label, keys, callback) {
-  var self = this;
-  exports.uniqueness.list.call(self, label, keys, function(err, constraints) {
-    if (err) {
-      if (err.statusCode != 404) return callback(err);
-    } else if (constraints.length > 0) return callback(null, constraints[0]);
-    // Seems like sometimes if this is being called very early in neo4j's init
-    // phase, the list command doesn't return a constraint, but the following
-    // calls sends back a 409. So we check for that, and don't send that error
-    // through.
-    exports.uniqueness.create.call(self, label, keys, function(err, constraint) {
-      if (err) {
-        if (err.statusCode == 409) {
-          // in this edgecase there's no way really for us to get the constraint
-          // object, so send back without (for now). hopefully there's a better
-          // way to handle this in the future.
-          return callback();
-        } else {
-          return callback(err);
-        }
-      }
-
-      callback(null, constraint);
-    });
-  });
-};
-
-exports.uniqueness.list = function(label, key, callback) {
-  if (typeof key == 'function') {
-    callback = key;
-    key = null;
-  }
-
-  label = encodeURIComponent(label);
-  var endpoint = util.format('schema/constraint/%s/uniqueness', label);
-
-  if (key) {
-    key = encodeURIComponent(key);
-    endpoint += '/' + key;
-  }
-
-  var op = this.operation(endpoint, 'GET');
-  this.call(op, function(err, constraints) {
-    if (err) callback(err);
-    else callback(null, constraints);
-  });
-};
-
-exports.uniqueness.drop = function(label, key, callback) {
-  label = encodeURIComponent(label);
-  key = encodeURIComponent(key);
-  var endpoint = util.format('schema/constraint/%s/uniqueness/%s', label, key);
-  var op = this.operation(endpoint, 'DELETE');
-  this.call(op, function(err) {
-    if (err) callback(err);
-    else callback();
-  });
-};
-
-exports.list = function(label, callback) {
-  if (typeof label == 'function') {
-    callback = label;
-    label = null; 
-  }
-
-  var endpoint = 'schema/constraint';
-
-  if (label) endpoint += '/' + encodeURIComponent(label);
-
-  var op = this.operation(endpoint, 'GET');
-  this.call(op, function(err, constraints) {
-    if (err) callback(err);
-    else callback(null, constraints);
-  });
-};
-
-},{"async":260,"naan":261,"underscore":320,"util":192}],255:[function(require,module,exports){
-var async = require('async');
-var naan = require('naan');
-var _ = require('underscore');
-var util = require('util');
-
-// although it looks like this will support compound keys, neo4j-2 doesn't yet, 
-// so attempting to create one will just give you an error from neo4j.
-exports.create = function(label, keys, callback) {
-  if (!Array.isArray(keys)) keys = [keys];
-
-  label = encodeURIComponent(label);
-  var body = { property_keys: keys };
-
-  var endpoint = util.format('schema/index/%s', label);
-  var op = this.operation(endpoint, 'POST', body);
-  this.call(op, function(err, index) {
-    if (err) callback(err);
-    else callback(null, index);
-  });
-};
-
-// this will need to be updated when compound keys are supported
-exports.createIfNone = function(label, keys, callback) {
-  var self = this;
-  exports.create.call(self, label, keys, function(err, index) {
-    if (!err) return callback(null, index);
-    if (err.statusCode != 409) return callback(err);
-    exports.list.call(self, label, function(err, indexes) {
-      if (err) return callback(err);
-      var index = indexes.filter(function(index) {
-        return index.property_keys[0] == keys;
-      });
-      callback(null, index[0]);
-    });
-  });
-};
-
-exports.list = function(label, callback) {
-  label = encodeURIComponent(label);
-  var endpoint = util.format('schema/index/%s', label);
-  var op = this.operation(endpoint, 'GET');
-  this.call(op, function(err, indexes) {
-    if (err) callback(err);
-    else callback(null, indexes);
-  });
-};
-
-exports.drop = function(label, key, callback) {
-  label = encodeURIComponent(label);
-  key = encodeURIComponent(key);
-  var endpoint = util.format('schema/index/%s/%s', label, key);
-  var op = this.operation(endpoint, 'DELETE');
-  this.call(op, function(err) {
-    if (err) callback(err);
-    else callback();
-  });
-}
-
-},{"async":260,"naan":261,"underscore":320,"util":192}],256:[function(require,module,exports){
-var async = require('async');
-var naan = require('naan');
-var _ = require('underscore');
-var util = require('util');
-
-function isValidType(type, callback) {
-  if (type !== 'node' && type !== 'relationship') {
-    callback(new Error("Invalid index type (should be 'node' or " +
-          "'relationship'."));
-    return false;
-  }
-  return true;
-}
-
-function saveUnique(mode) {
-  return function() {
-    var args = [].slice.call(arguments);
-    var type = args.shift();
-    args.push(mode);
-    if (type == 'node') return saveUniqueNode.apply(this, args);
-    else return saveUniqueRel.apply(this, args);
-  };
-};
-
-function saveUniqueNode(node, index, key, value, callback, mode) {
-  var self = this;
-
-  var request = {
-    key: key,
-    value: value,
-    properties: node
-  };
-
-  var endpoint = util.format('index/node/%s?uniqueness=%s', index, mode);
-  var op = this.operation(endpoint, 'POST', request);
-  this.call(op, function(err, node) {
-    if (err) return callback(err);
-    callback(null, this._createNodeObject(node));
-  });
-};
-
-function saveUniqueRel(start, rel, end, props, idx, key, value, cb, mode) {
-  var self = this;
-  if (typeof props == 'string') {
-    mode = cb;
-    cb = value;
-    value = key;
-    key = idx;
-    idx = props;
-    props = undefined;
-  }
-
-  start = this._getId(start);
-  end = this._getId(end);
-
-  if (!this._isValidId(start) || !this._isValidId(end)) {
-    return callback(new Error("Invalid ID"));
-  }
-
-  var request = {
-    key: key,
-    value: value,
-    start: this._location('node', start),
-    end: this._location('node', end),
-    type: rel
-  };
-
-  if (props) request.properties = props;
-
-  var endpoint = util.format('index/relationship/%s?uniqueness=%s', idx, mode);
-  var op = this.operation(endpoint, 'POST', request);
-  this.call(op, function(err, rel) {
-    if (err) return cb(err);
-    cb(null, self._createRelationshipObject(rel));
-  });
-};
-
-var indexModule = module.exports = {
-  create: function(type, name, config, callback) {
-    if (typeof name === 'function') {
-      callback = name;
-      name = type;
-      type = 'node';
-      config = null;
-    } else if (typeof config === 'function') {
-      callback = config;
-      if (typeof name === 'object' && !Array.isArray(name)) {
-        config = name;
-        name = type;
-        type = 'node';
-      } else {
-        config = null;
-      }
-    } 
-
-    if (Array.isArray(name)) {
-      var txn = this._safeBatch();
-      var indexer = naan.ncurry(txn[type].legacyindex.create, config, 1);
-      async.map(name, indexer, callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    if (!isValidType(type, callback)) {
-      return;
-    }
-
-    var request = { name: name };
-    if (config != null) {
-      request.config = config;
-    }
-
-    var endpoint = util.format('index/%s', type);
-    var op = this.operation(endpoint, 'POST', request);
-    this.call(op, function(err) {
-      callback(err);
-    });
-  },
-
-  add: function(type, indexName, obj, key, value, callback) {
-    if (typeof value === 'function') {
-      callback = value;
-      value = key;
-      key = obj;
-      obj = indexName;
-      indexName = type;
-      type = 'node';
-    }
-    
-    if (Array.isArray(obj)) {
-      var txn = this._safeBatch();
-      var args = [indexName, key, value];
-      var indexer = naan.ecurry(txn[type].legacyindex.add, args, [0, 2, 3]);
-      async.map(obj, indexer, callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    if (!isValidType(type, callback)) {
-      return;
-    }
-
-    var id = this._getId(obj);
-    if (!this._isValidId(id)) {
-      return callback(new Error("Invalid ID"));
-    }
-    var location = this._location(type, id);
-
-    var request = {
-      uri: location,
-      key: key,
-      value: value
-    };
-
-    indexName = encodeURIComponent(indexName);
-
-    var endpoint = util.format('index/%s/%s', type, indexName);
-    var op = this.operation(endpoint, 'POST', request);
-    this.call(op, function(err) {
-      callback(err);
-    });
-  },
-
-  readAsList: function(type, indexName, key, value, callback) {
-    if (typeof value === 'function') {
-      callback = value;
-      value = key;
-      key = indexName;
-      indexName = type;
-      type = 'node';
-    }
-
-    if (!isValidType(type, callback)) {
-      return;
-    }
-
-    indexName = encodeURIComponent(indexName);
-    value = encodeURIComponent(value); 
-    key = encodeURIComponent(key);
-
-    var ep = util.format('index/%s/%s/%s/%s', type, indexName, key, value);
-    var op = this.operation(ep, 'GET');
-    var self = this;
-    this.call(op, function(err, entities) {
-      if (err) {
-        return callback(err);
-      }
-
-      var entityObjects = entities.map(function(entity) {
-        return type === 'node'
-          ? self._createNodeObject(entity)
-          : self._createRelationshipObject(entity);
-      });
-
-      callback(null, entityObjects);
-    });
-  },
-
-  read: function(type, indexName, key, value, callback) {
-    indexModule.readAsList.call(this, type, indexName, key, value, function (err, results) {
-      if (err) return callback(err);
-
-      if (results.length === 1) {
-        callback(null, results[0]);
-      } else if (results.length === 0) {
-        callback(null, false);
-      } else {
-        callback(null, results);
-      }
-    });
-  },
-
-  getOrSaveUnique: saveUnique('get_or_create'),
-  saveUniqueOrFail: saveUnique('create_or_fail'),
-
-  remove: function(type, indexName, obj, key, value, callback) {
-    if (typeof key === 'function') {
-      callback = key, key = null, value = null;
-    } else if (typeof value === 'function') {
-      callback = value, value = null;
-    }
-    
-    if (Array.isArray(obj)) {
-      var txn = this._safeBatch();
-      var args = [indexName, key, value];
-      var rm = naan.ecurry(txn[type].legacyindex.remove, args, [0, 2, 3]);
-      async.map(obj, rm, callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    var id = this._getId(obj);
-    if (!this._isValidId(id)) {
-      return callback(new Error("Invalid ID"));
-    }
-
-    indexName = encodeURIComponent(indexName);
-    var endpoint = util.format('index/%s/%s', type, indexName);
-  
-    if (key) endpoint += '/' + encodeURIComponent(key);
-    if (value) endpoint += '/' + encodeURIComponent(value)
-
-    endpoint += '/' + id;
-
-    var op = this.operation(endpoint, 'DELETE');
-    this.call(op, function(err) {
-      callback(err);
-    });
-  },
-
-  delete: function(type, indexName, callback) {
-    if (Array.isArray(indexName)) {
-      var txn = this._safeBatch();
-      async.map(indexName, txn[type].legacyindex.delete, callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    indexName = encodeURIComponent(indexName);
-    var endpoint = util.format('index/%s/%s', type, indexName);
-    var op = this.operation(endpoint, 'DELETE');
-    this.call(op, function(err) {
-      callback(err);
-    });
-  }
-};
-
-},{"async":260,"naan":261,"underscore":320,"util":192}],257:[function(require,module,exports){
-var async = require('async');
-var naan = require('naan');
-var _ = require('underscore');
-var util = require('util');
-
-var node = module.exports = {
-  /**
-   * Save or update an object. If a new object is passed, the callback will
-   * return a copy of that object with the <options.id> key set to the id of the
-   * created object.
-   */
-  save: function(obj, key, val, callback) {
-    if (typeof key == 'function') {
-      callback = key;
-      key = val = undefined;
-    } else if (typeof val == 'function') {
-      callback = val;
-      val = undefined;
-    }
-
-    var label = undefined;
-    if (key != undefined && val == undefined) label = key;
-
-    if (label) {
-      if (this.isBatch) {
-        return callback(new Error("node.save with labels is not compatible with "
-                + "batch mode. Use db.save & db.label instead."));
-      }
-      var txn = this._safeBatch();
-      var node = txn.save(obj);
-      txn.label(node, label);
-      return this._safeBatchCommit(txn, function(err, result) {
-        if (err) callback(err);
-        else callback(null, result[node]);
-      });
-    } 
-
-    if (Array.isArray(obj)) {
-      var txn = this._safeBatch();
-      var args = [key, val];
-      async.map(obj, naan.ecurry(txn.save, args, [1, 2]), callback);
-      return this._safeBatchCommit(txn);
-    }
-    
-    var id = this._getId(obj, !key);
-    
-    if (!this._isValidId(id)) {
-      if (typeof obj !== 'object') {
-        return callback(new Error("No data to save"));
-      }
-
-      this.node._create(obj, callback);
-    } else {
-      if (val) this.node._updateProp(obj, key, val, callback);
-      else this.node._update(obj, callback);
-    }
-  },
-
-  /**
-   * Create a new object. Maps to /node.
-   */
-  _create: function(obj, callback) {
-    var op = this.operation('node', obj);
-    this.call(op, function(err, body, location) {
-      if (err) {
-        return callback(err);
-      }
-
-      var result = _.clone(obj);
-      result[this.options.id] = this._extractId(location);
-
-      callback(null, result);
-    });
-  },
-
-  /**
-   * Save the properties of an object. Maps to PUT /node/{id}/properties.
-   */
-  _update: function(obj, callback) {
-    var id = this._getId(obj, true);
-    if (!this._isValidId(id)) {
-      return callback(new Error("Invalid ID"));
-    }
-
-    var untouchedObj = _.clone(obj);
-    if (untouchedObj[this.options.id] != null) {
-      delete untouchedObj[this.options.id];
-    }
-
-    var endpoint = util.format('%s/properties', this._nodeRoot(id));
-    var op = this.operation(endpoint, 'PUT', untouchedObj);
-    this.call(op, function(err, body, response) {
-      if (err) {
-        return callback(err);
-      } else {
-        return callback(null, obj);
-      }
-    });
-  },
-
-  _updateProp: function(obj, key, val, callback) {
-    var id = this._getId(obj);
-    if (!this._isValidId(id)) {
-      return callback(new Error("Invalid ID"));
-    }
-
-    var endpoint = util.format('%s/properties/%s', this._nodeRoot(id), key);
-    var op = this.operation(endpoint, 'PUT', val);
-    this.call(op, function(err, body) {
-      if (err) return callback(err);
-      else {
-        obj = _.clone(obj);
-        obj[key] = val;
-        callback(null, obj);
-      }
-    });
-  },
-
-  /**
-   * Read an object's properties. Maps to GET node/{id}/properties.
-   */
-  read: function(id, property, callback) {
-    if (typeof property == 'function') {
-      callback = property;
-      property = null;
-    }
-
-    if (Array.isArray(id)) {
-      var txn = this._safeBatch();
-      async.map(id, naan.ncurry(txn.read, property, 1), callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    id = this._getId(id);
-    if (!this._isValidId(id)) {
-      return callback(new Error("Invalid ID"));
-    }
-
-    var endpoint;
-    if (!property) 
-      endpoint = util.format('%s/properties', this._nodeRoot(id));
-    else
-      endpoint = util.format('%s/properties/%s', this._nodeRoot(id), property);
-    var op = this.operation(endpoint);
-    this.call(op, function(err, body) {
-      if (err) {
-        return callback(err);
-      } else {
-        if (!property) body[this.options.id] = id;
-        return callback(null, body);
-      }
-    });
-  },
-
-  /**
-   * Delete an object. Maps to DELETE node/{id}
-   * If force is truthy, delete node and all its relations.
-   */
-  delete: function(id, force, callback) {
-    var property = null;
-    if (typeof force == 'function') {
-      callback = force;
-      force = false;
-    } else if (typeof force == 'string') {
-      property = force;
-      force = false;
-    }
-
-    if (Array.isArray(id)) {
-      var txn = this._safeBatch();
-      async.map(id, naan.ncurry(txn.node.delete, force || property, 1), callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    var object = id;
-    id = this._getId(id);
-    if (!this._isValidId(id)) {
-      return callback(new Error("Invalid ID"));
-    }
-
-    if (!force) {
-      var endpoint;
-      if (!property) endpoint = this._nodeRoot(id);
-      else
-        endpoint = util.format('%s/properties/%s', this._nodeRoot(id), property);
-      var op = this.operation(endpoint, 'DELETE');
-      this.call(op, function(err) { 
-        if (!property || err || typeof object != 'object') callback(err);
-        else {
-          delete object[property];
-          callback(null, object);
-        }
-      });
-    } else {
-      this.query([
-        'START node=node({root})',
-        'OPTIONAL MATCH node-[rel]-()',
-        'DELETE node, rel'
-      ].join(' '), {root: id}, function(err) { callback(err) });
-    }
-  },
-
-  /**
-   * Relate objects together. maps to POST node/{first}/relationships
-   */
-  relate: function(startNode, type, endNode, properties, callback) {
-    this.rel.create(startNode, type, endNode, properties, callback);
-  },
-
-  /**
-   * Retrieve a set of relationships for the given node. Optionally specify the
-   * direction and relationship name.
-   *
-   * `direction` must be one of "all", "in" or "out".
-   *
-   * db.relationships(obj|id, [direction, [relationshipName]], callback)
-   */
-  relationships: function(obj, direction, relName, callback) {
-    if (typeof direction === 'function') {
-      callback = direction;
-      direction = 'all';
-      relName = '';
-    } else {
-      if (typeof relName === 'function') {
-        callback = relName;
-        relName = '';
-      }
-
-      if (typeof direction !== 'string') {
-        return callback(new Error('Invalid direction - ' + direction));
-      } else if (typeof relName !== 'string') {
-        return callback(new Error('Invalid relationship name - ' + relName));
-      }
-
-      direction = direction.toLowerCase();
-      if (['in', 'all', 'out'].indexOf(direction) === -1) {
-        return callback(new Error('Invalid direction - ' + direction));
-      }
-    }
-
-    if (Array.isArray(obj)) {
-      var txn = this._safeBatch();
-      var args = [ direction, relName ];
-      var rels = naan.ecurry(txn.node.relationships, args, [1, 2]);
-      async.map(obj, rels, callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    var objId = this._getId(obj);
-
-    if (!this._isValidId(objId)) {
-      callback(new Error("Invalid ID"));
-    }
-
-    var nodeRoot = this._nodeRoot(objId);
-    var endpoint = util.format('%s/relationships/%s', nodeRoot, direction);
-    if (relName) {
-      endpoint += "/" + relName;
-    }
-    var op = this.operation(endpoint);
-    var self = this;
-    this.call(op, function(err, rels) {
-      if (err) {
-        callback(err);
-      } else {
-        rels = rels.map(function(rel) {
-          return self._createRelationshipObject(rel);
-        });
-        callback(null, rels);
-      }
-    });
-  },
-
-  /**
-   * Perform a query based on a predicate. The predicate is translated to a
-   * cypher query.
-   */
-  find: function(predicate, any, label, callback) {
-    if (typeof any == 'function') {
-      callback = any;
-      any = false;
-      label = null;
-    } else if (typeof label == 'function') {
-      callback = label;
-      if (typeof any == 'string') {
-        label = any;
-        any = false;
-      } else {
-        label = null;
-      }
-    } 
-    
-    if (Array.isArray(predicate)) {
-      var txn = this._safeBatch();
-      var finder = naan.ecurry(txn.node.find, [any, label], [1, 2]);
-      async.map(predicate, finder, callback);
-      return this._safeBatchCommit(txn);
-    } 
-
-    if (typeof predicate !== 'object') callback(new Error('Invalid Predicate'));
-
-    var matchers = Object.keys(predicate).reduce(function(matchers, key) {
-      return matchers.push(util.format("n.%s = {%s}", key, key)), matchers;
-    }, []);
-
-    var cypher = [ 
-      label == null ? "MATCH n" : util.format("MATCH (n:`%s`)", label),
-      matchers.length > 0 ? "WHERE" : "",
-      matchers.join(any ? " or " : " and "), 
-      "RETURN n"
-    ].join(" ");
-
-    this.query(cypher, predicate, callback);
-  },
-
-  label: function(node, label, replace, callback) {
-    if (typeof replace == 'function') {
-      callback = replace;
-      replace = false;
-    }
-
-    if (Array.isArray(node)) {
-      var txn = this._safeBatch();
-      async.map(node, naan.ecurry(txn.label, [label, replace], [1,2]), callback);
-      return this._safeBatchCommit(txn);
-    }
-    
-    var id = this._getId(node);
-    if (!this._isValidId(id)) return callback(new Error("Invalid ID"));
-
-    var endpoint = util.format('%s/labels', this._nodeRoot(id));
-    var op = this.operation(endpoint, replace ? 'PUT' : 'POST', label);
-    this.call(op, function(err) {
-      if (err) callback(err);
-      else callback();
-    });
-  },
-
-  removeLabel: function(node, label, callback) {
-    if (Array.isArray(node)) {
-      var txn = this._safeBatch();
-      async.map(node, naan.ncurry(txn.removeLabel, label, 1), callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    var id = this._getId(node);
-    if (!this._isValidId(id)) return callback(new Error("Invalid ID"));
-
-    var endpoint = util.format('%s/labels/%s', this._nodeRoot(id), label);
-    var op = this.operation(endpoint, 'DELETE');
-    this.call(op, function(err) {
-      if (err) callback(err);
-      else callback();
-    });
-  },
-
-  nodesWithLabel: function(label, callback) {
-    var endpoint = util.format('label/%s/nodes', label);
-    var op = this.operation(endpoint, 'GET');
-    this.call(op, function(err, nodes) {
-      if (err || !nodes) return callback(err, nodes);
-      nodes = nodes.map(this._createNodeObject);
-      callback(null, nodes);
-    });
-  },
-
-  readLabels: function(node, callback) {
-    if (typeof node == 'function') {
-      callback = node;
-      node = undefined;
-    }
-
-    if (Array.isArray(node)) {
-      var txn = this._safeBatch();
-      async.map(node, txn.readLabels, function(err, allLabels) {
-        if (err) return callback(err);
-        callback(null, _.uniq(_.flatten(allLabels)));
-      });
-      return this._safeBatchCommit(txn);
-    }
-
-    var endpoint;
-    if (node) {
-      var id = this._getId(node);
-      if (!this._isValidId(id)) return callback(new Error("Invalid ID"));
-      endpoint = util.format('%s/labels', this._nodeRoot(id));
-    } else {
-      endpoint = 'labels';
-    }
-    var op = this.operation(endpoint, 'GET');
-    this.call(op, function(err, labels) {
-      if (err) callback(err);
-      else callback(null, labels);
-    });
-  }
-}
-
-},{"async":260,"naan":261,"underscore":320,"util":192}],258:[function(require,module,exports){
-var async = require('async');
-var naan = require('naan');
-var _ = require('underscore');
-var util = require('util');
-
-module.exports = {
-  /**
-   * Create a new relationship between two nodes. Maps to 
-   * POST node/<startNodeId>/relationship
-   */
-  create: function(startNode, type, endNode, properties, callback) {
-    if (typeof properties === 'function') {
-      callback = properties;
-      properties = null;
-    }
-
-    if (Array.isArray(startNode)) {
-      var txn = this._safeBatch();
-      var args = [ type, endNode, properties ];
-      async.map(startNode, naan.ecurry(txn.rel.create, args, [1,2,3]), 
-          function(err, rels) {
-            if (!err && Array.isArray(endNode))
-              return callback(err, _.flatten(rels));
-            callback(err, rels);
-          });
-      return this._safeBatchCommit(txn);
-    } else if (Array.isArray(endNode)) {
-      var txn = this._safeBatch();
-      var args = [ startNode, type, properties ];
-      async.map(endNode, naan.ecurry(txn.rel.create, args, [0,1,3]), callback);
-      return this._safeBatchCommit(txn);
-    }
-    
-    var startNodeId = this._getId(startNode),
-        endNodeId = this._getId(endNode);
-
-    if (!this._isValidId(startNodeId) ||
-        !this._isValidId(endNodeId)) {
-      return callback(new Error("Invalid ID"));
-    }
-
-    var request = {
-      to: this._location('node', endNodeId),
-      type: type,
-    };
-
-    if (properties) {
-      request['data'] = properties;
-    }
-
-    var endpoint = util.format('%s/relationships', this._nodeRoot(startNodeId));
-    var op = this.operation(endpoint, 'POST', request);
-    this.call(op, function(err, rel) {
-      if (err) {
-        callback(err);
-      } else {
-        callback(null, this._createRelationshipObject(rel));
-      }
-    });
-  },
-
-  /**
-   * Update the properties of a given relationship. Maps to
-   * PUT relationship/<id>/properties
-   */
-  update: function(rel, key, val, callback) {
-    if (typeof key == 'function') {
-      callback = key;
-      key = val = undefined;
-    }
-
-    if (Array.isArray(rel)) {
-      var txn = this._safeBatch();
-      var args = [key, val];
-      async.map(rel, naan.ecurry(txn.rel.update, args, [1, 2]), callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    var id = this._getId(rel);
-
-    if (!this._isValidId(id)) {
-      return callback(new Error("Invalid ID"));
-    }
-
-    var endpoint = util.format('%s/properties', this._relRoot(id));
-    if (key) endpoint += '/' + key;
-
-    var op = this.operation(endpoint, 'PUT', key ? val : rel.properties);
-    this.call(op, function(err) {
-      callback(err);
-    });
-  }, 
-
-  read: function(id, callback) {
-    if (Array.isArray(id)) {
-      var txn = this._safeBatch();
-      async.map(id, txn.rel.read, callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    id = this._getId(id);
-
-    if (!this._isValidId(id)) {
-      return callback(new Error("Invalid ID"));
-    }
-
-    var endpoint = this._relRoot(id);
-    var op = this.operation(endpoint);
-    this.call(op, function(err, rel) {
-      if (err) {
-        callback(err);
-      } else {
-        callback(null, this._createRelationshipObject(rel));
-      }
-    });
-  },
-
-  delete: function(id, callback) {
-    if (Array.isArray(id)) {
-      var txn = this._safeBatch();
-      async.map(id, txn.rel.delete, callback);
-      return this._safeBatchCommit(txn);
-    }
-
-    id = this._getId(id);
-
-    if (!this._isValidId(id)) {
-      return callback(new Error("Invalid ID"));
-    }
-
-    var endpoint = this._relRoot(id);
-    var op = this.operation(endpoint, 'DELETE');
-    this.call(op, function(err, rel) {
-      callback(err);
-    });
-  }
-};
-
-},{"async":260,"naan":261,"underscore":320,"util":192}],259:[function(require,module,exports){
-var naan = require('naan');
-var async = require('async');
-var request = require('request');
-var _ = require('lodash');
-var assert = require('assert');
-var util = require('util');
-
-var defaultOptions = {
-    // Location of the server
-    server: 'http://localhost:7474'
-
-    // datbase endpoint
-  , endpoint: '/db/data'
-
-    // The key to use when inserting an id into objects. 
-  , id: 'id'
-}, optionKeys = Object.keys(defaultOptions);
-
-// Bind all functions of an object to a context (recursively)
-var bindAllTo = function(context, all) {
-  return Object.keys(all).reduce(function(bound, key) {
-    if (typeof all[key] == 'object') bound[key] = bindAllTo(context, all[key]);
-    else if (typeof all[key] == 'function') bound[key] = all[key].bind(context);
-    else bound[key] = all[key];
-    return bound;
-  }, {});
-}
-
-function Seraph(options) {
-  if (typeof options === 'string') {
-    options = { server: options };
-  };
-  this.options = _.extend({}, defaultOptions, options);
-  this.options.server = this.options.server
-    .replace(/\/$/, '');        // remove trailing /
-  this.options.endpoint = this.options.endpoint
-    .replace(/\/$/, '')         // remove trailing /
-    .replace(/^([^\/])/, '/$1'); // add leading /
-
-  _.bindAll.apply(_, [this].concat(_.functions(this)));
-
-  this.node = bindAllTo(this, require('./node'));
-  this.relationship = this.rel = bindAllTo(this, require('./relationship'));
-  this.index = bindAllTo(this, require('./index'));
-  this.constraints = bindAllTo(this, require('./constraints'));
-  var legacyindexGeneric = bindAllTo(this, require('./legacyindex'));
-
-
-  // Alias & curry seraph.index on seraph.node & seraph.rel
-  this.node.legacyindex = naan.curry(legacyindexGeneric.add, 'node');
-  this.rel.legacyindex = naan.curry(legacyindexGeneric.add, 'relationship');
-  naan.ecrock(this.node.legacyindex, legacyindexGeneric, naan.curry, 'node');
-  naan.ecrock(this.rel.legacyindex, legacyindexGeneric, naan.curry, 'relationship');
-
-  _.extend(this, this.node);
-}
-
-/**
- * Create an operation that can later be passed to call().
- *
- * Path is relative to the service endpoint - `node` gets
- * transformed to `<options.server><options.endpoint>/node`.
- * 
- * If `method` is not supplied, it will default GET, unless `data`
- * is supplied, in which case it will default to 'POST'.
- *
- * seraph#operation(opts, path, [method='get'], [data]);
- */
-Seraph.prototype.operation = function(path, method, data) {
-  // Get args in the right order
-  if (typeof data === 'undefined') {
-    data = null;
-  }
-  if (typeof method === 'object') {
-    data = method;
-    method = 'POST';
-  }
-  if (typeof method === 'undefined') {
-    method = 'GET';
-  }
-
-  // Ensure we have a usable HTTP verb.
-  if (typeof method !== 'string') {
-    throw new Error('Invalid HTTP Verb - ' + method);
-  } else {
-    method = method.toUpperCase();
-  }
-
-  return {
-    'method': method,
-    'to'    : path,
-    'body'  : data
-  };
-};
-
-// returns a new batch if the context was not already that of a batch - prevents
-// batch nesting which can break intra-batch referencing
-Seraph.prototype._safeBatch = function() {
-  return this.isBatch ? this : this.batch();
-};
-
-// similarly, this takes a BatchSeraph and only commits it if the calling context 
-// is not that of a batch.
-Seraph.prototype._safeBatchCommit = function(txn, callback) {
-  if (this.isBatch) {
-    if (callback) this.commitCallbacks.push(callback);
-  } else {
-    txn.commit(callback);
-  }
-};
-
-/**
- * Function to call an HTTP request to the rest service.
- * 
- * Requires an operation object of form:
- *   { method: 'PUT'|'POST'|'GET'|'DELETE'
- *   , to    : path,
- *   , body  : object }
- *
- * Operation objects are easily created by seraph#operation.
- *
- * seraph#call(operation, callback);
- */
-Seraph.prototype.call = function(operation, callback) {
-  // Ensure callback is callable. Throw instead of calling back if none.
-  if (typeof callback !== 'function') {
-    callback = function(err) {
-      if (err) throw err;
-    }
-  }
-
-  var requestOpts = {
-    uri: this.options.server + this.options.endpoint + '/' + operation.to,
-    method: operation.method,
-    headers: { 'Accept': 'application/json' }
-  };
-
-  if (operation.body) requestOpts.json = operation.body;
-  callback = _.bind(callback, this);
-  
-  // Allows mocking
-  (this._request || request)(requestOpts, function(err, response, body) {
-    if (err) {
-      callback(err);
-    } else if (response.statusCode < 200 || response.statusCode >= 300) {
-      if (typeof body == 'string') {
-        try {
-          body = JSON.parse(body);
-        } catch (error) {}
-      }
-      // Pass on neo4j error
-      var error;
-      if (typeof body == "object" && body.exception) {
-        error = new Error(body.message);
-        error.neo4jError = body;
-        error.neo4jException = body.exception;
-        error.neo4jStacktrace = body.stacktrace;
-        if (body.cause) error.neo4jCause = body.cause;
-      } else {
-        // Can't understand this as a neo4j error
-        error = new Error(body || response.statusCode);
-        error.response = response;
-      }
-      error.statusCode = response.statusCode;
-      callback(error);
-    } else {
-      if (operation.method === 'GET' && response.statusCode === 204) {
-        var error = new Error("no content");
-        error.statusCode = response.statusCode;
-        return callback(error);
-      }
-      
-      _.defer(function() {
-
-      if (body === '') body = null;
-      else if (typeof body === 'string') {
-        try {
-          body = JSON.parse(body);
-        } catch (e) {
-          return callback(e);
-        }
-      }
-
-      callback(null, body, response.headers.location);
-      });
-    }
-  });
-};
-
-/**
- * If `obj` is an object, return the value of key <options.id>. Otherwise,
- * return `obj`.
- *
- * If `requireData` is truthy, `obj` must be an object, otherwise undefined is
- * returned.
- */
-Seraph.prototype._getId = function(obj, requireData) {
-  var id;
-  if (requireData) {
-    id = typeof obj == 'object' ? obj[this.options.id] : undefined;
-  } else if (this._isBatchId(obj)) {
-    return obj;
-  } else {
-    id = typeof obj == 'object' ? obj[this.options.id] : obj;
-  }
-
-  if (id != null) id = parseInt(id, 10);
-  return id;
-};
-
-Seraph.prototype._isValidId = function(id) {
-  return !isNaN(parseInt(id, 10)) || this._isBatchId(id);
-};
-
-/**
- * Take the end off a url and parse it as an int
- */
-Seraph.prototype._extractId = function(location) {
-  var matches = location.match(/\/(\d+)$/);
-  if (!matches) {
-    return null;
-  }
-
-  return parseInt(matches[1], 10);
-};
-
-/**
- * Infer whether or not the given object is a node
- */
-Seraph.nodeFlags = [ 
-  'outgoing_relationships',
-  'incoming_relationships',
-  'all_relationships',
-  'data',
-  'properties',
-  'self'
-];
-Seraph.prototype._isNode = function(node) {
-  if (!node || typeof node !== 'object') {
-    return false;
-  }
-
-  var inNode = node.hasOwnProperty.bind(node);
-  return Seraph.nodeFlags.every(inNode) && 
-         typeof node.data === 'object';
-};
-
-/**
- * Infer whether or not the given object is a relationship
- */
-Seraph.relationshipFlags = [
-  'start',
-  'data',
-  'self',
-  'properties',
-  'end'
-];
-Seraph.prototype._isRelationship = function(rel) {
-  if (!rel || typeof rel !== 'object') {
-    return false;
-  }
-
-  var inRelationship = rel.hasOwnProperty.bind(rel);
-  return Seraph.relationshipFlags.every(inRelationship) &&
-         typeof rel.data === 'object';
-};
-
-Seraph.prototype._isBatchId = function(id) {
-  return this.isBatch && typeof id == 'string' && id.match(/^{\d+}$/);
-};
-
-Seraph.prototype._nodeRoot = function(id) {
-  return this._isBatchId(id) ? id : 'node/' + id;
-};
-
-Seraph.prototype._relRoot = function(id) {
-  return this._isBatchId(id) ? id : 'relationship/' + id;
-};
-
-/**
- * Returns the url to an entity given an id
- */
-Seraph.prototype._location = function(type, id) {
-  if (this._isBatchId(id)) return id;
-  return util.format('%s%s/%s/%d',
-                     this.options.server, this.options.endpoint, type, id);
-};
-
-/**
- * Create a relationship object from the given relationship data returned from
- * the neo4j server
- */
-Seraph.prototype._createRelationshipObject = function(relationshipData) {
-  var relationshipObj = { 
-    start: this._extractId(relationshipData.start),
-    end: this._extractId(relationshipData.end),
-    type: relationshipData.type,
-    properties: relationshipData.data
-  };
-
-  relationshipObj[this.options.id] = this._extractId(relationshipData.self);
-
-  return relationshipObj;
-};
-
-/** 
- * Create a node object from the given node data return from the neo4j server
- */
-Seraph.prototype._createNodeObject = function(nodeData) {
-  var nodeObj = nodeData.data || {};
-  nodeObj[this.options.id] = this._extractId(nodeData.self);
-
-  return nodeObj;
-};
-
-  /**
-   * Perform a cypher query. Maps to POST cypher
-   */
-Seraph.prototype.queryRaw = function(query, params, callback) {
-  if (typeof query !== 'string') {
-    return callback(new Error('Invalid Query'));
-  }
-  if (typeof params !== 'object') {
-    if (typeof params === 'function') {
-      callback = params;
-    }
-    params = {};
-  }
-
-  query = { query: query, params: params };
-  var op = this.operation('cypher', query);
-  this.call(op, function(err, result) {
-    if (err) {
-      callback(err);
-    } else {
-      callback(null, result);
-    }
-  });
-};
-
-/**
- * Perform a cypher query and map the columns and results together.
- */
-Seraph.prototype.query = function(query, params, callback) {
-  if (typeof params !== 'object') {
-    if (typeof params === 'function') {
-      callback = params;
-    }
-    params = {};
-  }
-  
-  var self = this;
-  this.queryRaw(query, params, function(err, result) {
-    if (err) {
-      return callback(err);
-    }
-    
-    var namedResults = result.data.map(function(row) {
-      return result.columns.reduce(function(rowObj, columnName, columnIndex) {
-        var resultItem = row[columnIndex];
-        function extractAttributes(item) {
-          if (self._isNode(item)) {
-            return self._createNodeObject(item);
-          } else if (self._isRelationship(item)) {
-            return self._createRelationshipObject(item);
-          } else if (item === Object(item)) {
-            var temp = {};
-            Object.keys(item).forEach(function(key) {
-              temp[key] = extractAttributes(item[key])
-            })
-            return temp;
-          } else {
-            return item;
-          }
-        }
-        if (Array.isArray(resultItem))
-          rowObj[columnName] = resultItem.map(extractAttributes);
-        else
-          rowObj[columnName] = extractAttributes(resultItem);
-        
-        return rowObj;
-      }, {});
-    });
-
-    if (namedResults.length > 0) {
-      var resultsAreObjects = typeof namedResults[0][result.columns[0]] == 'object';
-      if (result.columns.length === 1 && resultsAreObjects) {
-        namedResults = namedResults.map(function(namedResult) {
-          return namedResult[result.columns[0]];
-        });
-      } else if (namedResults.length == 1 && !resultsAreObjects) {
-        namedResults = namedResults[0];
-      }
-    }
-
-    callback(null, namedResults);
-  });
-};
-
-var globalCounter = 0;
-function wrapForBatchFormat(id) { return '{' + id + '}' };
-function BatchSeraphId(id, refersTo, batch) {
-  if (Array.isArray(refersTo)) {
-    refersTo = refersTo.map(wrapForBatchFormat);
-    refersTo.forEach(function(id, index) {
-      this[index] = id;
-    }.bind(this));
-  } else {
-    refersTo = wrapForBatchFormat(refersTo);
-  }
-
-  this.id = id;
-  this.refersTo = refersTo;
-  this.batch = batch;
-}
-Object.defineProperty(BatchSeraphId.prototype, 'valueOf', {
-  enumerable: false, configurable: false, writable: false,
-  value: function() { return this.id }
-});
-Object.defineProperty(BatchSeraphId.prototype, 'toString', {
-  enumerable: false, configurable: false, writable: false,
-  value: function() { return this.id } 
-});
-
-function BatchSeraph(parentSeraph) {
-  var self = this;
-  var uniq = Date.now() + ++globalCounter;
-
-  function isBatchId(id) {
-    return id instanceof BatchSeraphId && id.batch == uniq;
-  };
-
-  function createId(id, refersTo) {
-    return new BatchSeraphId(id, refersTo, uniq);
-  };
-
-  function transformBatchArgs(args) {
-    return args.map(function(arg) {
-      if (Array.isArray(arg)) return transformBatchArgs(arg);
-      return isBatchId(arg) ? arg.refersTo : arg;
-    });
-  };
-
-  function wrapFunctions(parent, target) {
-    var derived = target || {};
-
-    Object.keys(parent).forEach(function(key) {
-      var valueType = typeof parent[key];
-
-      if (valueType === 'function') {
-        derived[key] = wrapFunction(parent[key]);
-
-        if (Object.keys(parent[key]).length > 0) {
-          derived[key] = wrapFunctions(parent[key], derived[key]);
-        }
-      } else if (valueType === 'object') {
-        derived[key] = wrapFunctions(parent[key]);
-      } else {
-        derived[key] = parent[key];
-      }
-    });
-    return derived;
-  }
-
-  function wrapFunction(fn) {
-    fn = naan.rcurry(fn, function(err, result) {
-      if (err && !self.error) self.error = err;
-      self.results.push(result);
-      var cb = self.callbacks.shift();
-      if (cb) cb(err, result);
-    });
-    return function() {
-      self.operationQueueStack.unshift([]);
-
-      var args = [].slice.apply(arguments);
-
-      if (args.length > 1 && typeof args[args.length - 1] == 'function') {
-        self.callbacks.push(args.pop());
-      } else {
-        self.callbacks.push(null);
-      }
-
-      args = transformBatchArgs(args);
-
-      // Context does not matter because all functions are bound upon seraph init
-      fn.apply(undefined, args);
-
-      var operationIds = _.pluck(self.operationQueueStack[0], 'id');
-      self.operationQueueStack.shift();
-
-      var operationId = operationIds.length 
-        ? operationIds[0] - self.operationOffset : undefined;
-
-      if (operationIds.length > 1) {
-        self.operationOffset += operationIds.length - 1;
-        operationId = createId(operationId, operationIds);
-      } else if (operationId != null) {
-        operationId = createId(operationId, operationIds[0]);
-      }
-
-      return operationId;
-    };
-  }
-
-  this.super = new Seraph(parentSeraph.options);
-  this.__proto__ = wrapFunctions(this.super);
-  this.isBatch = this.super.isBatch = true;
-  this.batch = undefined; // disabled nesting.
-  this.processors = [];
-  this.operations = [];
-  this.callbacks = [];
-  this.results = [];
-  this.operationOffset = 0;
-  this.operationQueueStack = [];
-  this.commitCallbacks = [];
-
-  this.super.call = function(operation, processor) {
-    operation.id = self.operations.length;
-    if (!operation.body) delete operation.body;
-
-    self.operations.push(operation);
-    self.processors.push(processor.bind(self.super));
-    self.operationQueueStack[0].push(operation);
-  };
-  
-  this.commit = function(callback) {
-    if (callback) self.commitCallbacks.push(callback);
-    if (self.error) {
-      return self.commitCallbacks.forEach(function(callback) {
-        callback(self.error);
-      });
-    }
-    var op = parentSeraph.operation('batch', 'POST', self.operations);
-    parentSeraph.call(op, function(err, results) {
-      if (err) {
-        while (self.callbacks.length) {
-          var cb = self.callbacks.shift();
-          if (cb) cb(err);
-        }
-        return self.commitCallbacks.forEach(function(callback) {
-          callback(err);
-        });
-      }
-
-      results.forEach(function(result) {
-        self.processors.shift()(null, result.body || {}, result.location);
-      });
-
-      self.commitCallbacks.forEach(function(callback) {
-        callback(null, self.results);
-      });
-    });
-  };
-}
-
-Seraph.prototype.isBatch = false;
-
-Seraph.prototype.batch = function(operations, callback) {
-  if (!arguments.length) return new BatchSeraph(this);
-
-  var batchSeraph = new BatchSeraph(this);
-  operations(batchSeraph);
-  batchSeraph.commit(callback);
-};
-
-module.exports = function(options) {
-  return new Seraph(options);
-};
-
-},{"./constraints":254,"./index":255,"./legacyindex":256,"./node":257,"./relationship":258,"assert":9,"async":260,"lodash":195,"naan":261,"request":262,"util":192}],260:[function(require,module,exports){
-(function (process){
-/*global setImmediate: false, setTimeout: false, console: false */
-(function () {
-
-    var async = {};
-
-    // global on the server, window in the browser
-    var root, previous_async;
-
-    root = this;
-    if (root != null) {
-      previous_async = root.async;
-    }
-
-    async.noConflict = function () {
-        root.async = previous_async;
-        return async;
-    };
-
-    function only_once(fn) {
-        var called = false;
-        return function() {
-            if (called) throw new Error("Callback was already called.");
-            called = true;
-            fn.apply(root, arguments);
-        }
-    }
-
-    //// cross-browser compatiblity functions ////
-
-    var _each = function (arr, iterator) {
-        if (arr.forEach) {
-            return arr.forEach(iterator);
-        }
-        for (var i = 0; i < arr.length; i += 1) {
-            iterator(arr[i], i, arr);
-        }
-    };
-
-    var _map = function (arr, iterator) {
-        if (arr.map) {
-            return arr.map(iterator);
-        }
-        var results = [];
-        _each(arr, function (x, i, a) {
-            results.push(iterator(x, i, a));
-        });
-        return results;
-    };
-
-    var _reduce = function (arr, iterator, memo) {
-        if (arr.reduce) {
-            return arr.reduce(iterator, memo);
-        }
-        _each(arr, function (x, i, a) {
-            memo = iterator(memo, x, i, a);
-        });
-        return memo;
-    };
-
-    var _keys = function (obj) {
-        if (Object.keys) {
-            return Object.keys(obj);
-        }
-        var keys = [];
-        for (var k in obj) {
-            if (obj.hasOwnProperty(k)) {
-                keys.push(k);
-            }
-        }
-        return keys;
-    };
-
-    //// exported async module functions ////
-
-    //// nextTick implementation with browser-compatible fallback ////
-    if (typeof process === 'undefined' || !(process.nextTick)) {
-        if (typeof setImmediate === 'function') {
-            async.nextTick = function (fn) {
-                // not a direct alias for IE10 compatibility
-                setImmediate(fn);
-            };
-            async.setImmediate = async.nextTick;
-        }
-        else {
-            async.nextTick = function (fn) {
-                setTimeout(fn, 0);
-            };
-            async.setImmediate = async.nextTick;
-        }
-    }
-    else {
-        async.nextTick = process.nextTick;
-        if (typeof setImmediate !== 'undefined') {
-            async.setImmediate = function (fn) {
-              // not a direct alias for IE10 compatibility
-              setImmediate(fn);
-            };
-        }
-        else {
-            async.setImmediate = async.nextTick;
-        }
-    }
-
-    async.each = function (arr, iterator, callback) {
-        callback = callback || function () {};
-        if (!arr.length) {
-            return callback();
-        }
-        var completed = 0;
-        _each(arr, function (x) {
-            iterator(x, only_once(function (err) {
-                if (err) {
-                    callback(err);
-                    callback = function () {};
-                }
-                else {
-                    completed += 1;
-                    if (completed >= arr.length) {
-                        callback(null);
-                    }
-                }
-            }));
-        });
-    };
-    async.forEach = async.each;
-
-    async.eachSeries = function (arr, iterator, callback) {
-        callback = callback || function () {};
-        if (!arr.length) {
-            return callback();
-        }
-        var completed = 0;
-        var iterate = function () {
-            iterator(arr[completed], function (err) {
-                if (err) {
-                    callback(err);
-                    callback = function () {};
-                }
-                else {
-                    completed += 1;
-                    if (completed >= arr.length) {
-                        callback(null);
-                    }
-                    else {
-                        iterate();
-                    }
-                }
-            });
-        };
-        iterate();
-    };
-    async.forEachSeries = async.eachSeries;
-
-    async.eachLimit = function (arr, limit, iterator, callback) {
-        var fn = _eachLimit(limit);
-        fn.apply(null, [arr, iterator, callback]);
-    };
-    async.forEachLimit = async.eachLimit;
-
-    var _eachLimit = function (limit) {
-
-        return function (arr, iterator, callback) {
-            callback = callback || function () {};
-            if (!arr.length || limit <= 0) {
-                return callback();
-            }
-            var completed = 0;
-            var started = 0;
-            var running = 0;
-
-            (function replenish () {
-                if (completed >= arr.length) {
-                    return callback();
-                }
-
-                while (running < limit && started < arr.length) {
-                    started += 1;
-                    running += 1;
-                    iterator(arr[started - 1], function (err) {
-                        if (err) {
-                            callback(err);
-                            callback = function () {};
-                        }
-                        else {
-                            completed += 1;
-                            running -= 1;
-                            if (completed >= arr.length) {
-                                callback();
-                            }
-                            else {
-                                replenish();
-                            }
-                        }
-                    });
-                }
-            })();
-        };
-    };
-
-
-    var doParallel = function (fn) {
-        return function () {
-            var args = Array.prototype.slice.call(arguments);
-            return fn.apply(null, [async.each].concat(args));
-        };
-    };
-    var doParallelLimit = function(limit, fn) {
-        return function () {
-            var args = Array.prototype.slice.call(arguments);
-            return fn.apply(null, [_eachLimit(limit)].concat(args));
-        };
-    };
-    var doSeries = function (fn) {
-        return function () {
-            var args = Array.prototype.slice.call(arguments);
-            return fn.apply(null, [async.eachSeries].concat(args));
-        };
-    };
-
-
-    var _asyncMap = function (eachfn, arr, iterator, callback) {
-        var results = [];
-        arr = _map(arr, function (x, i) {
-            return {index: i, value: x};
-        });
-        eachfn(arr, function (x, callback) {
-            iterator(x.value, function (err, v) {
-                results[x.index] = v;
-                callback(err);
-            });
-        }, function (err) {
-            callback(err, results);
-        });
-    };
-    async.map = doParallel(_asyncMap);
-    async.mapSeries = doSeries(_asyncMap);
-    async.mapLimit = function (arr, limit, iterator, callback) {
-        return _mapLimit(limit)(arr, iterator, callback);
-    };
-
-    var _mapLimit = function(limit) {
-        return doParallelLimit(limit, _asyncMap);
-    };
-
-    // reduce only has a series version, as doing reduce in parallel won't
-    // work in many situations.
-    async.reduce = function (arr, memo, iterator, callback) {
-        async.eachSeries(arr, function (x, callback) {
-            iterator(memo, x, function (err, v) {
-                memo = v;
-                callback(err);
-            });
-        }, function (err) {
-            callback(err, memo);
-        });
-    };
-    // inject alias
-    async.inject = async.reduce;
-    // foldl alias
-    async.foldl = async.reduce;
-
-    async.reduceRight = function (arr, memo, iterator, callback) {
-        var reversed = _map(arr, function (x) {
-            return x;
-        }).reverse();
-        async.reduce(reversed, memo, iterator, callback);
-    };
-    // foldr alias
-    async.foldr = async.reduceRight;
-
-    var _filter = function (eachfn, arr, iterator, callback) {
-        var results = [];
-        arr = _map(arr, function (x, i) {
-            return {index: i, value: x};
-        });
-        eachfn(arr, function (x, callback) {
-            iterator(x.value, function (v) {
-                if (v) {
-                    results.push(x);
-                }
-                callback();
-            });
-        }, function (err) {
-            callback(_map(results.sort(function (a, b) {
-                return a.index - b.index;
-            }), function (x) {
-                return x.value;
-            }));
-        });
-    };
-    async.filter = doParallel(_filter);
-    async.filterSeries = doSeries(_filter);
-    // select alias
-    async.select = async.filter;
-    async.selectSeries = async.filterSeries;
-
-    var _reject = function (eachfn, arr, iterator, callback) {
-        var results = [];
-        arr = _map(arr, function (x, i) {
-            return {index: i, value: x};
-        });
-        eachfn(arr, function (x, callback) {
-            iterator(x.value, function (v) {
-                if (!v) {
-                    results.push(x);
-                }
-                callback();
-            });
-        }, function (err) {
-            callback(_map(results.sort(function (a, b) {
-                return a.index - b.index;
-            }), function (x) {
-                return x.value;
-            }));
-        });
-    };
-    async.reject = doParallel(_reject);
-    async.rejectSeries = doSeries(_reject);
-
-    var _detect = function (eachfn, arr, iterator, main_callback) {
-        eachfn(arr, function (x, callback) {
-            iterator(x, function (result) {
-                if (result) {
-                    main_callback(x);
-                    main_callback = function () {};
-                }
-                else {
-                    callback();
-                }
-            });
-        }, function (err) {
-            main_callback();
-        });
-    };
-    async.detect = doParallel(_detect);
-    async.detectSeries = doSeries(_detect);
-
-    async.some = function (arr, iterator, main_callback) {
-        async.each(arr, function (x, callback) {
-            iterator(x, function (v) {
-                if (v) {
-                    main_callback(true);
-                    main_callback = function () {};
-                }
-                callback();
-            });
-        }, function (err) {
-            main_callback(false);
-        });
-    };
-    // any alias
-    async.any = async.some;
-
-    async.every = function (arr, iterator, main_callback) {
-        async.each(arr, function (x, callback) {
-            iterator(x, function (v) {
-                if (!v) {
-                    main_callback(false);
-                    main_callback = function () {};
-                }
-                callback();
-            });
-        }, function (err) {
-            main_callback(true);
-        });
-    };
-    // all alias
-    async.all = async.every;
-
-    async.sortBy = function (arr, iterator, callback) {
-        async.map(arr, function (x, callback) {
-            iterator(x, function (err, criteria) {
-                if (err) {
-                    callback(err);
-                }
-                else {
-                    callback(null, {value: x, criteria: criteria});
-                }
-            });
-        }, function (err, results) {
-            if (err) {
-                return callback(err);
-            }
-            else {
-                var fn = function (left, right) {
-                    var a = left.criteria, b = right.criteria;
-                    return a < b ? -1 : a > b ? 1 : 0;
-                };
-                callback(null, _map(results.sort(fn), function (x) {
-                    return x.value;
-                }));
-            }
-        });
-    };
-
-    async.auto = function (tasks, callback) {
-        callback = callback || function () {};
-        var keys = _keys(tasks);
-        if (!keys.length) {
-            return callback(null);
-        }
-
-        var results = {};
-
-        var listeners = [];
-        var addListener = function (fn) {
-            listeners.unshift(fn);
-        };
-        var removeListener = function (fn) {
-            for (var i = 0; i < listeners.length; i += 1) {
-                if (listeners[i] === fn) {
-                    listeners.splice(i, 1);
-                    return;
-                }
-            }
-        };
-        var taskComplete = function () {
-            _each(listeners.slice(0), function (fn) {
-                fn();
-            });
-        };
-
-        addListener(function () {
-            if (_keys(results).length === keys.length) {
-                callback(null, results);
-                callback = function () {};
-            }
-        });
-
-        _each(keys, function (k) {
-            var task = (tasks[k] instanceof Function) ? [tasks[k]]: tasks[k];
-            var taskCallback = function (err) {
-                var args = Array.prototype.slice.call(arguments, 1);
-                if (args.length <= 1) {
-                    args = args[0];
-                }
-                if (err) {
-                    var safeResults = {};
-                    _each(_keys(results), function(rkey) {
-                        safeResults[rkey] = results[rkey];
-                    });
-                    safeResults[k] = args;
-                    callback(err, safeResults);
-                    // stop subsequent errors hitting callback multiple times
-                    callback = function () {};
-                }
-                else {
-                    results[k] = args;
-                    async.setImmediate(taskComplete);
-                }
-            };
-            var requires = task.slice(0, Math.abs(task.length - 1)) || [];
-            var ready = function () {
-                return _reduce(requires, function (a, x) {
-                    return (a && results.hasOwnProperty(x));
-                }, true) && !results.hasOwnProperty(k);
-            };
-            if (ready()) {
-                task[task.length - 1](taskCallback, results);
-            }
-            else {
-                var listener = function () {
-                    if (ready()) {
-                        removeListener(listener);
-                        task[task.length - 1](taskCallback, results);
-                    }
-                };
-                addListener(listener);
-            }
-        });
-    };
-
-    async.waterfall = function (tasks, callback) {
-        callback = callback || function () {};
-        if (tasks.constructor !== Array) {
-          var err = new Error('First argument to waterfall must be an array of functions');
-          return callback(err);
-        }
-        if (!tasks.length) {
-            return callback();
-        }
-        var wrapIterator = function (iterator) {
-            return function (err) {
-                if (err) {
-                    callback.apply(null, arguments);
-                    callback = function () {};
-                }
-                else {
-                    var args = Array.prototype.slice.call(arguments, 1);
-                    var next = iterator.next();
-                    if (next) {
-                        args.push(wrapIterator(next));
-                    }
-                    else {
-                        args.push(callback);
-                    }
-                    async.setImmediate(function () {
-                        iterator.apply(null, args);
-                    });
-                }
-            };
-        };
-        wrapIterator(async.iterator(tasks))();
-    };
-
-    var _parallel = function(eachfn, tasks, callback) {
-        callback = callback || function () {};
-        if (tasks.constructor === Array) {
-            eachfn.map(tasks, function (fn, callback) {
-                if (fn) {
-                    fn(function (err) {
-                        var args = Array.prototype.slice.call(arguments, 1);
-                        if (args.length <= 1) {
-                            args = args[0];
-                        }
-                        callback.call(null, err, args);
-                    });
-                }
-            }, callback);
-        }
-        else {
-            var results = {};
-            eachfn.each(_keys(tasks), function (k, callback) {
-                tasks[k](function (err) {
-                    var args = Array.prototype.slice.call(arguments, 1);
-                    if (args.length <= 1) {
-                        args = args[0];
-                    }
-                    results[k] = args;
-                    callback(err);
-                });
-            }, function (err) {
-                callback(err, results);
-            });
-        }
-    };
-
-    async.parallel = function (tasks, callback) {
-        _parallel({ map: async.map, each: async.each }, tasks, callback);
-    };
-
-    async.parallelLimit = function(tasks, limit, callback) {
-        _parallel({ map: _mapLimit(limit), each: _eachLimit(limit) }, tasks, callback);
-    };
-
-    async.series = function (tasks, callback) {
-        callback = callback || function () {};
-        if (tasks.constructor === Array) {
-            async.mapSeries(tasks, function (fn, callback) {
-                if (fn) {
-                    fn(function (err) {
-                        var args = Array.prototype.slice.call(arguments, 1);
-                        if (args.length <= 1) {
-                            args = args[0];
-                        }
-                        callback.call(null, err, args);
-                    });
-                }
-            }, callback);
-        }
-        else {
-            var results = {};
-            async.eachSeries(_keys(tasks), function (k, callback) {
-                tasks[k](function (err) {
-                    var args = Array.prototype.slice.call(arguments, 1);
-                    if (args.length <= 1) {
-                        args = args[0];
-                    }
-                    results[k] = args;
-                    callback(err);
-                });
-            }, function (err) {
-                callback(err, results);
-            });
-        }
-    };
-
-    async.iterator = function (tasks) {
-        var makeCallback = function (index) {
-            var fn = function () {
-                if (tasks.length) {
-                    tasks[index].apply(null, arguments);
-                }
-                return fn.next();
-            };
-            fn.next = function () {
-                return (index < tasks.length - 1) ? makeCallback(index + 1): null;
-            };
-            return fn;
-        };
-        return makeCallback(0);
-    };
-
-    async.apply = function (fn) {
-        var args = Array.prototype.slice.call(arguments, 1);
-        return function () {
-            return fn.apply(
-                null, args.concat(Array.prototype.slice.call(arguments))
-            );
-        };
-    };
-
-    var _concat = function (eachfn, arr, fn, callback) {
-        var r = [];
-        eachfn(arr, function (x, cb) {
-            fn(x, function (err, y) {
-                r = r.concat(y || []);
-                cb(err);
-            });
-        }, function (err) {
-            callback(err, r);
-        });
-    };
-    async.concat = doParallel(_concat);
-    async.concatSeries = doSeries(_concat);
-
-    async.whilst = function (test, iterator, callback) {
-        if (test()) {
-            iterator(function (err) {
-                if (err) {
-                    return callback(err);
-                }
-                async.whilst(test, iterator, callback);
-            });
-        }
-        else {
-            callback();
-        }
-    };
-
-    async.doWhilst = function (iterator, test, callback) {
-        iterator(function (err) {
-            if (err) {
-                return callback(err);
-            }
-            if (test()) {
-                async.doWhilst(iterator, test, callback);
-            }
-            else {
-                callback();
-            }
-        });
-    };
-
-    async.until = function (test, iterator, callback) {
-        if (!test()) {
-            iterator(function (err) {
-                if (err) {
-                    return callback(err);
-                }
-                async.until(test, iterator, callback);
-            });
-        }
-        else {
-            callback();
-        }
-    };
-
-    async.doUntil = function (iterator, test, callback) {
-        iterator(function (err) {
-            if (err) {
-                return callback(err);
-            }
-            if (!test()) {
-                async.doUntil(iterator, test, callback);
-            }
-            else {
-                callback();
-            }
-        });
-    };
-
-    async.queue = function (worker, concurrency) {
-        if (concurrency === undefined) {
-            concurrency = 1;
-        }
-        function _insert(q, data, pos, callback) {
-          if(data.constructor !== Array) {
-              data = [data];
-          }
-          _each(data, function(task) {
-              var item = {
-                  data: task,
-                  callback: typeof callback === 'function' ? callback : null
-              };
-
-              if (pos) {
-                q.tasks.unshift(item);
-              } else {
-                q.tasks.push(item);
-              }
-
-              if (q.saturated && q.tasks.length === concurrency) {
-                  q.saturated();
-              }
-              async.setImmediate(q.process);
-          });
-        }
-
-        var workers = 0;
-        var q = {
-            tasks: [],
-            concurrency: concurrency,
-            saturated: null,
-            empty: null,
-            drain: null,
-            push: function (data, callback) {
-              _insert(q, data, false, callback);
-            },
-            unshift: function (data, callback) {
-              _insert(q, data, true, callback);
-            },
-            process: function () {
-                if (workers < q.concurrency && q.tasks.length) {
-                    var task = q.tasks.shift();
-                    if (q.empty && q.tasks.length === 0) {
-                        q.empty();
-                    }
-                    workers += 1;
-                    var next = function () {
-                        workers -= 1;
-                        if (task.callback) {
-                            task.callback.apply(task, arguments);
-                        }
-                        if (q.drain && q.tasks.length + workers === 0) {
-                            q.drain();
-                        }
-                        q.process();
-                    };
-                    var cb = only_once(next);
-                    worker(task.data, cb);
-                }
-            },
-            length: function () {
-                return q.tasks.length;
-            },
-            running: function () {
-                return workers;
-            }
-        };
-        return q;
-    };
-
-    async.cargo = function (worker, payload) {
-        var working     = false,
-            tasks       = [];
-
-        var cargo = {
-            tasks: tasks,
-            payload: payload,
-            saturated: null,
-            empty: null,
-            drain: null,
-            push: function (data, callback) {
-                if(data.constructor !== Array) {
-                    data = [data];
-                }
-                _each(data, function(task) {
-                    tasks.push({
-                        data: task,
-                        callback: typeof callback === 'function' ? callback : null
-                    });
-                    if (cargo.saturated && tasks.length === payload) {
-                        cargo.saturated();
-                    }
-                });
-                async.setImmediate(cargo.process);
-            },
-            process: function process() {
-                if (working) return;
-                if (tasks.length === 0) {
-                    if(cargo.drain) cargo.drain();
-                    return;
-                }
-
-                var ts = typeof payload === 'number'
-                            ? tasks.splice(0, payload)
-                            : tasks.splice(0);
-
-                var ds = _map(ts, function (task) {
-                    return task.data;
-                });
-
-                if(cargo.empty) cargo.empty();
-                working = true;
-                worker(ds, function () {
-                    working = false;
-
-                    var args = arguments;
-                    _each(ts, function (data) {
-                        if (data.callback) {
-                            data.callback.apply(null, args);
-                        }
-                    });
-
-                    process();
-                });
-            },
-            length: function () {
-                return tasks.length;
-            },
-            running: function () {
-                return working;
-            }
-        };
-        return cargo;
-    };
-
-    var _console_fn = function (name) {
-        return function (fn) {
-            var args = Array.prototype.slice.call(arguments, 1);
-            fn.apply(null, args.concat([function (err) {
-                var args = Array.prototype.slice.call(arguments, 1);
-                if (typeof console !== 'undefined') {
-                    if (err) {
-                        if (console.error) {
-                            console.error(err);
-                        }
-                    }
-                    else if (console[name]) {
-                        _each(args, function (x) {
-                            console[name](x);
-                        });
-                    }
-                }
-            }]));
-        };
-    };
-    async.log = _console_fn('log');
-    async.dir = _console_fn('dir');
-    /*async.info = _console_fn('info');
-    async.warn = _console_fn('warn');
-    async.error = _console_fn('error');*/
-
-    async.memoize = function (fn, hasher) {
-        var memo = {};
-        var queues = {};
-        hasher = hasher || function (x) {
-            return x;
-        };
-        var memoized = function () {
-            var args = Array.prototype.slice.call(arguments);
-            var callback = args.pop();
-            var key = hasher.apply(null, args);
-            if (key in memo) {
-                callback.apply(null, memo[key]);
-            }
-            else if (key in queues) {
-                queues[key].push(callback);
-            }
-            else {
-                queues[key] = [callback];
-                fn.apply(null, args.concat([function () {
-                    memo[key] = arguments;
-                    var q = queues[key];
-                    delete queues[key];
-                    for (var i = 0, l = q.length; i < l; i++) {
-                      q[i].apply(null, arguments);
-                    }
-                }]));
-            }
-        };
-        memoized.memo = memo;
-        memoized.unmemoized = fn;
-        return memoized;
-    };
-
-    async.unmemoize = function (fn) {
-      return function () {
-        return (fn.unmemoized || fn).apply(null, arguments);
-      };
-    };
-
-    async.times = function (count, iterator, callback) {
-        var counter = [];
-        for (var i = 0; i < count; i++) {
-            counter.push(i);
-        }
-        return async.map(counter, iterator, callback);
-    };
-
-    async.timesSeries = function (count, iterator, callback) {
-        var counter = [];
-        for (var i = 0; i < count; i++) {
-            counter.push(i);
-        }
-        return async.mapSeries(counter, iterator, callback);
-    };
-
-    async.compose = function (/* functions... */) {
-        var fns = Array.prototype.reverse.call(arguments);
-        return function () {
-            var that = this;
-            var args = Array.prototype.slice.call(arguments);
-            var callback = args.pop();
-            async.reduce(fns, args, function (newargs, fn, cb) {
-                fn.apply(that, newargs.concat([function () {
-                    var err = arguments[0];
-                    var nextargs = Array.prototype.slice.call(arguments, 1);
-                    cb(err, nextargs);
-                }]))
-            },
-            function (err, results) {
-                callback.apply(that, [err].concat(results));
-            });
-        };
-    };
-
-    var _applyEach = function (eachfn, fns /*args...*/) {
-        var go = function () {
-            var that = this;
-            var args = Array.prototype.slice.call(arguments);
-            var callback = args.pop();
-            return eachfn(fns, function (fn, cb) {
-                fn.apply(that, args.concat([cb]));
-            },
-            callback);
-        };
-        if (arguments.length > 2) {
-            var args = Array.prototype.slice.call(arguments, 2);
-            return go.apply(this, args);
-        }
-        else {
-            return go;
-        }
-    };
-    async.applyEach = doParallel(_applyEach);
-    async.applyEachSeries = doSeries(_applyEach);
-
-    async.forever = function (fn, callback) {
-        function next(err) {
-            if (err) {
-                if (callback) {
-                    return callback(err);
-                }
-                throw err;
-            }
-            fn(next);
-        }
-        next();
-    };
-
-    // AMD / RequireJS
-    if (typeof define !== 'undefined' && define.amd) {
-        define([], function () {
-            return async;
-        });
-    }
-    // Node.js
-    else if (typeof module !== 'undefined' && module.exports) {
-        module.exports = async;
-    }
-    // included directly via <script> tag
-    else {
-        root.async = async;
-    }
-
-}());
-
-}).call(this,require('_process'))
-},{"_process":172}],261:[function(require,module,exports){
-(function(undefined) {
-  var async, 
-      root = this;
-
-  if (typeof module !== 'undefined' && module.exports) {
-    async = require('async');
-  } else {
-    if (root.async) {
-      async = root.async;
-    } else {
-      throw 'Naan requires the "async" module. Get it from ' +
-            'https://github.com/caolan/async.git';
-    }
-  }
-
-  var bound = (function() {
-    var naan = {};
-    // context: the context to bind fn to
-    // fn: the function to curry
-    // args: the args to create a curry with
-    // position: if (true|false) - true = curry args at the start of the arg list
-    //                           - false = curry args at the end of the arg list
-    //           if numeric, indicates the location in the args list to insert the
-    //             args. if this position is great than the length of the passed args,
-    //             then the args are added at the end
-    function curry(context, fn, curryArgs, pos) {
-      var garnisher = garnish.prepare(curryArgs, pos);
-      function kitchen(fn) {
-        return function curriedFunction() {
-          return fn.apply(context || this, garnisher(arguments));
-        };
-      }
-
-      return Array.isArray(fn) ? fn.map(kitchen) : kitchen(fn);
-    }
-
-    // This creates a curried function which asynchronously resolves the arguments 
-    // by calling the `ingredients` functions before `fn` is called.
-    //
-    // fn               The function to curry. 
-    //
-    // ingredients      The function(s) to resolve before calling `fn`. These must
-    //                  be of the signature `function(callback) {}`. The callback
-    //                  takes 2 arguments, the first being `err`, and the second 
-    //                  being parameter that will be passed to `fn` (its position
-    //                  depends on `recipe`, otherwise it will be inserted at the
-    //                  start of the parameter list). 
-    //
-    //                  If `err` is not falsy, `fn`'s callback will be called with
-    //                  that object rather than `fn`.
-    //
-    // recipe           Optional. The locations in the parameter list to insert the
-    //                  results from the ingredients. Valid values are true, false,
-    //                  a number, or an array of numbers the same size as
-    //                  ingredients. See the `curry` docs for details.
-    //
-    // callbackPosition Optional. The location in the parameter list of the
-    //                  `fn`'s callback after the values from the cooked
-    //                  ingredients are added. If this is falsy or negative, it
-    //                  assumes the last parameter in the list. If null or false, it
-    //                  indicates `fn` doesn't know about the callback so `cook`
-    //                  should call it manually. If false, it indicates that
-    //                  callback should /not/ be passed to `fn`. If you specify this
-    //                  parameter you must specify `recipe` aswell.
-    //
-    // noParallel       Optional. If set to true, the `ingredients` functions are
-    //                  run in series, rather than parallel. If you specify this
-    //                  parameter you must specify `recipe` & `callbackPosition`
-    //                  as well.
-    naan.cook =
-    function cook(context, fn, ingredients, recipe, callbackPosition, noParallel) {
-      var oven = noParallel ? async.series : async.parallel;
-      var originalCbPosition = callbackPosition;
-      if (!Array.isArray(ingredients)) {
-        ingredients = [ ingredients ];
-      }
-
-      return function() {
-        var smorgasbord = [].slice.call(arguments);
-
-        if (!callbackPosition || callbackPosition < 0) {
-          callbackPosition = smorgasbord.length - 1;
-        } else {
-          if (typeof recipe === 'number' && recipe < callbackPosition) {
-            callbackPosition--;
-          } else if (recipe === undefined || recipe === true) {
-            callbackPosition--;
-          } else {
-            for (var index in recipe) {
-              if (recipe[index] < callbackPosition) {
-                callbackPosition--;
-              }
-            }
-          }
-        }
-
-        var callback = smorgasbord[callbackPosition];
-        if (originalCbPosition === false) {
-          smorgasbord = [].concat(
-            smorgasbord.slice(0, callbackPosition),
-            smorgasbord.slice(callbackPosition + 1)
-          );
-        }
-
-        if (typeof callback !== 'function') {
-          return;
-        }
-
-        oven(ingredients, function(err, vegetables) {
-          if (err) {
-            callback(err);
-          } else {
-            var result = fn.apply(
-              context, 
-              garnish.prepare(vegetables, recipe)(smorgasbord)
-            );
-            if (originalCbPosition === false || originalCbPosition === null) {
-              callback(null, result);
-            }
-          }
-        });
-      };
-    }
-
-    function garnish(args, curryArgs, pos) {
-      var opargs = Array.prototype;
-      if (pos === undefined || pos === true || pos === 0 || pos < 0) {
-        opargs = curryArgs.concat(opargs.slice.call(args));
-      } else if (pos === false || args.length < pos) {
-        opargs = opargs.slice.call(args).concat(curryArgs);
-      } else if (Array.isArray(pos)) {
-        opargs = opargs.slice.call(args);
-
-        for (var index in pos) {
-          if (index >= curryArgs.length) {
-            break;
-          } else if (index == pos.length - 1 && curryArgs.length > pos.length) {
-            opargs.splice.apply(
-              opargs, 
-              [pos[index], 0].concat( curryArgs.slice(index) )
-            );
-          } else {
-            opargs.splice(pos[index], 0, curryArgs[index]);
-          }
-        }
-      } else {
-        opargs = [].concat(
-          opargs.slice.call(args, 0, pos),
-          curryArgs,
-          opargs.slice.call(args, pos)
-        );
-      }
-      return opargs;
-    }
-
-    garnish.prepare = function(curryArgs, pos) {
-      if (Array.isArray(pos)) {
-        var index = -1;
-        var sortable = curryArgs.map(function(val) {
-          return {
-            index: ++index >= pos.length ? pos[pos.length - 1] : pos[index],
-            value: val
-          };
-        })
-        sortable.sort(function(l, r) {
-          return l.index - r.index;
-        });
-        curryArgs = sortable.map(function(item) {
-          return item.value;
-        });
-        pos = pos.slice().sort();
-      }
-
-      return function(meal) {
-        return garnish(meal, curryArgs, pos);
-      };
-    }
-
-    naan.tupperware = naan.alwaysReturn = naan.wrap =
-    function tupperware(context, fn, val) {
-      return function() {
-        fn.apply(context, arguments);
-        return val;
-      }
-    }
-
-    naan.ltupperware = naan.lalwaysReturn = naan.lwrap =
-    function ltupperware(context, val, fn) {
-      return tupperware(context, fn, val);
-    }
-
-    naan.curry = naan.leftCurry = naan.lcurry =
-    function leftCurry(context, fn) {
-      return curry(context, fn, [].slice.call(arguments, 2));
-    }
-
-    naan.rightCurry = naan.rcurry =
-    function rightCurry(context, fn) {
-      return curry(context, fn, [].slice.call(arguments, 2), false);
-    }
-
-    naan.curryArgs = naan.leftCurryArgs = naan.lcurrya = naan.currya =
-    function curryArgs(context, fn, args) {
-      return curry(context, fn, args);
-    }
-
-    naan.rightCurryArgs = naan.rcurrya =
-    function rightCurryArgs(context, fn, args) {
-      return curry(context, fn, args, false);
-    }
-
-    naan.positionCurry = naan.ncurry = naan.pcurry =
-    function positionCurry(context, fn, args, pos) {
-      if (!Array.isArray(args)) {
-        args = [ args ];
-      }
-      return curry(context, fn, args, pos);
-    }
-
-    naan.entangleCurry = naan.ecurry = function() {
-      return curry.apply(this, Array.prototype.slice.call(arguments));
-    };
-
-
-    return naan;
-  })();
-
-  // "zomboCrock" because it doess absolutely everything you want. And that's
-  // why we don't expose it anywhere! Ok, ok, if you would like a real name, 
-  // `recursiveExtendCrock` would be suitable.
-  function zomboCrock(result, group, recurse, curryfn) {
-    var result = result || (Array.isArray(group) ? [] : {});
-    var curryargs = Array.prototype.slice.call(arguments, 4);
-
-    if (typeof curryfn !== 'function') {
-      curryargs.unshift(curryfn);
-      curryfn = naan.curry;
-    }
-
-    curryargs.unshift(null);
-    var memos = [], idx = 0;
-
-    for (var key in group) {
-      if ((idx = memos.indexOf(group[key])) !== -1) {
-        result[key] = memos[idx];
-      } else {
-        if (typeof group[key] === 'object' && recurse && group[key] != null) {
-          var recurseArgs = [ {}, group[key], true, curryfn ];
-          recurseArgs = recurseArgs.concat(curryargs.slice(1));
-          memos.push(result[key] = zomboCrock.apply(this, recurseArgs));
-        } else if (typeof group[key] !== 'function') {
-          result[key] = group[key];
-        } else {
-          curryargs[0] = group[key];
-          result[key] = curryfn.apply(this, curryargs);
-          memos.push(result[key]);
-        }
-      }
-    }
-
-    return result;
-  }
-
-  // ub = "unbound". Creates a version of naan that doesn't require a context
-  // argument.
-  var ub = zomboCrock({}, bound, 0, bound.curry(this, bound.curry, null), null);
-
-  var extendCrock = ub.ncurry(zomboCrock, false, 2);
-  var crock = ub.curry(extendCrock, false);
-  ub.recursiveExtendCrock = ub.recursiveExtendGroupCurry = 
-    ub.ncurry(zomboCrock, true, 2);
-  ub.crock = ub.groupCurry = ub.group = ub.gcurry = crock; 
-  ub.extendCrock = ub.ecrock = ub.egroup = ub.egcurry = extendCrock;
-
-  ub.b = ub.bound = bound;
-
-  ub.extendCombine = ub.ecombine = function(base, target, args, fn) {
-    fn = fn || ub.curry;
-    var result = base || (Array.isArray(target) ? [] : {});
-    if (Array.isArray(target) && target.length !== args.length) {
-      return undefined;
-    }
-    for (var key in target) {
-      if (typeof args[key] === 'undefined') {
-        continue;
-      }
-      var cargs = [ target[key] ].concat(args[key]);
-      result[key] = fn.apply(this, cargs);
-    }
-    return result;
-  }
-  ub.combine = ub.curry(ub.ecombine, null);
-
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = ub;
-  } else {
-    root.naan = ub;
-  }
-})()
-
-},{"async":260}],262:[function(require,module,exports){
-arguments[4][196][0].apply(exports,arguments)
-},{"./lib/cookies":264,"./lib/helpers":267,"./request":319,"dup":196,"util":192}],263:[function(require,module,exports){
-arguments[4][197][0].apply(exports,arguments)
-},{"./helpers":267,"caseless":279,"dup":197,"node-uuid":306}],264:[function(require,module,exports){
-arguments[4][198][0].apply(exports,arguments)
-},{"dup":198,"tough-cookie":314}],265:[function(require,module,exports){
-arguments[4][199][0].apply(exports,arguments)
-},{"dup":199}],266:[function(require,module,exports){
-arguments[4][200][0].apply(exports,arguments)
-},{"_process":172,"dup":200}],267:[function(require,module,exports){
-arguments[4][201][0].apply(exports,arguments)
-},{"_process":172,"buffer":23,"crypto":27,"dup":201,"json-stringify-safe":302,"util":192}],268:[function(require,module,exports){
-arguments[4][202][0].apply(exports,arguments)
-},{"caseless":279,"dup":202,"node-uuid":306,"oauth-sign":307,"qs":308,"querystring":176}],269:[function(require,module,exports){
-arguments[4][203][0].apply(exports,arguments)
-},{"crypto":27,"dup":203,"url":190}],270:[function(require,module,exports){
-arguments[4][204][0].apply(exports,arguments)
-},{"buffer":23,"dup":204,"readable-stream/duplex":271,"util":192}],271:[function(require,module,exports){
-arguments[4][177][0].apply(exports,arguments)
-},{"./lib/_stream_duplex.js":272,"dup":177}],272:[function(require,module,exports){
-arguments[4][178][0].apply(exports,arguments)
-},{"./_stream_readable":273,"./_stream_writable":274,"_process":172,"core-util-is":275,"dup":178,"inherits":276}],273:[function(require,module,exports){
-arguments[4][180][0].apply(exports,arguments)
-},{"_process":172,"buffer":23,"core-util-is":275,"dup":180,"events":163,"inherits":276,"isarray":277,"stream":188,"string_decoder/":278}],274:[function(require,module,exports){
-arguments[4][182][0].apply(exports,arguments)
-},{"./_stream_duplex":272,"_process":172,"buffer":23,"core-util-is":275,"dup":182,"inherits":276,"stream":188}],275:[function(require,module,exports){
-arguments[4][183][0].apply(exports,arguments)
-},{"buffer":23,"dup":183}],276:[function(require,module,exports){
-arguments[4][169][0].apply(exports,arguments)
-},{"dup":169}],277:[function(require,module,exports){
-arguments[4][170][0].apply(exports,arguments)
-},{"dup":170}],278:[function(require,module,exports){
-arguments[4][189][0].apply(exports,arguments)
-},{"buffer":23,"dup":189}],279:[function(require,module,exports){
-arguments[4][213][0].apply(exports,arguments)
-},{"dup":213}],280:[function(require,module,exports){
-arguments[4][214][0].apply(exports,arguments)
-},{"buffer":23,"delayed-stream":281,"dup":214,"stream":188,"util":192}],281:[function(require,module,exports){
-arguments[4][215][0].apply(exports,arguments)
-},{"dup":215,"stream":188,"util":192}],282:[function(require,module,exports){
-arguments[4][216][0].apply(exports,arguments)
-},{"dup":216,"http":164,"https":168,"net":8,"tls":8,"util":192}],283:[function(require,module,exports){
-arguments[4][217][0].apply(exports,arguments)
-},{"_process":172,"async":284,"buffer":23,"combined-stream":280,"dup":217,"fs":8,"http":164,"https":168,"mime-types":303,"path":171,"url":190,"util":192}],284:[function(require,module,exports){
-arguments[4][218][0].apply(exports,arguments)
-},{"_process":172,"dup":218}],285:[function(require,module,exports){
-arguments[4][219][0].apply(exports,arguments)
-},{"dup":219}],286:[function(require,module,exports){
-arguments[4][220][0].apply(exports,arguments)
-},{"./parser":287,"./signer":288,"./util":289,"./verify":290,"dup":220}],287:[function(require,module,exports){
-arguments[4][221][0].apply(exports,arguments)
-},{"assert-plus":297,"dup":221,"util":192}],288:[function(require,module,exports){
-arguments[4][222][0].apply(exports,arguments)
-},{"assert-plus":297,"crypto":27,"dup":222,"http":164,"util":192}],289:[function(require,module,exports){
-arguments[4][223][0].apply(exports,arguments)
-},{"asn1":296,"assert-plus":297,"buffer":23,"crypto":27,"ctype":300,"dup":223}],290:[function(require,module,exports){
-arguments[4][224][0].apply(exports,arguments)
-},{"assert-plus":297,"crypto":27,"dup":224}],291:[function(require,module,exports){
-arguments[4][225][0].apply(exports,arguments)
-},{"dup":225}],292:[function(require,module,exports){
-arguments[4][226][0].apply(exports,arguments)
-},{"./errors":291,"./reader":293,"./types":294,"./writer":295,"dup":226}],293:[function(require,module,exports){
-arguments[4][227][0].apply(exports,arguments)
-},{"./errors":291,"./types":294,"assert":9,"buffer":23,"dup":227}],294:[function(require,module,exports){
-arguments[4][228][0].apply(exports,arguments)
-},{"dup":228}],295:[function(require,module,exports){
-arguments[4][229][0].apply(exports,arguments)
-},{"./errors":291,"./types":294,"assert":9,"buffer":23,"dup":229}],296:[function(require,module,exports){
-arguments[4][230][0].apply(exports,arguments)
-},{"./ber/index":292,"dup":230}],297:[function(require,module,exports){
-arguments[4][231][0].apply(exports,arguments)
-},{"_process":172,"assert":9,"buffer":23,"dup":231,"stream":188,"util":192}],298:[function(require,module,exports){
-arguments[4][232][0].apply(exports,arguments)
-},{"assert":9,"dup":232}],299:[function(require,module,exports){
-arguments[4][233][0].apply(exports,arguments)
-},{"assert":9,"dup":233}],300:[function(require,module,exports){
-arguments[4][234][0].apply(exports,arguments)
-},{"./ctf.js":298,"./ctio.js":299,"assert":9,"buffer":23,"dup":234}],301:[function(require,module,exports){
-arguments[4][235][0].apply(exports,arguments)
-},{"dup":235,"stream":188}],302:[function(require,module,exports){
-arguments[4][236][0].apply(exports,arguments)
-},{"dup":236}],303:[function(require,module,exports){
-arguments[4][237][0].apply(exports,arguments)
-},{"dup":237,"mime-db":305}],304:[function(require,module,exports){
-arguments[4][238][0].apply(exports,arguments)
-},{"dup":238}],305:[function(require,module,exports){
-arguments[4][239][0].apply(exports,arguments)
-},{"./db.json":304,"dup":239}],306:[function(require,module,exports){
-arguments[4][240][0].apply(exports,arguments)
-},{"dup":240}],307:[function(require,module,exports){
-arguments[4][241][0].apply(exports,arguments)
-},{"crypto":27,"dup":241,"querystring":176}],308:[function(require,module,exports){
-arguments[4][242][0].apply(exports,arguments)
-},{"./lib/":309,"dup":242}],309:[function(require,module,exports){
-arguments[4][243][0].apply(exports,arguments)
-},{"./parse":310,"./stringify":311,"dup":243}],310:[function(require,module,exports){
-arguments[4][244][0].apply(exports,arguments)
-},{"./utils":312,"dup":244}],311:[function(require,module,exports){
-arguments[4][245][0].apply(exports,arguments)
-},{"./utils":312,"dup":245}],312:[function(require,module,exports){
-arguments[4][246][0].apply(exports,arguments)
-},{"dup":246}],313:[function(require,module,exports){
-arguments[4][247][0].apply(exports,arguments)
-},{"buffer":23,"dup":247,"stream":188,"string_decoder":189,"util":192}],314:[function(require,module,exports){
-arguments[4][248][0].apply(exports,arguments)
-},{"./memstore":315,"./pubsuffix":316,"./store":317,"dup":248,"net":8,"punycode":173,"url":190}],315:[function(require,module,exports){
-arguments[4][249][0].apply(exports,arguments)
-},{"./cookie":314,"./store":317,"dup":249,"util":192}],316:[function(require,module,exports){
-arguments[4][250][0].apply(exports,arguments)
-},{"dup":250}],317:[function(require,module,exports){
-arguments[4][251][0].apply(exports,arguments)
-},{"dup":251}],318:[function(require,module,exports){
-arguments[4][252][0].apply(exports,arguments)
-},{"_process":172,"assert":9,"buffer":23,"dup":252,"events":163,"http":164,"https":168,"net":8,"tls":8,"util":192}],319:[function(require,module,exports){
-arguments[4][253][0].apply(exports,arguments)
-},{"./lib/auth":263,"./lib/cookies":264,"./lib/copy":265,"./lib/getProxyFromURI":266,"./lib/helpers":267,"./lib/oauth":268,"_process":172,"aws-sign2":269,"bl":270,"buffer":23,"caseless":279,"combined-stream":280,"dup":253,"forever-agent":282,"form-data":283,"hawk":285,"http":164,"http-signature":286,"https":168,"isstream":301,"mime-types":303,"net":8,"node-uuid":306,"qs":308,"querystring":176,"stream":188,"stringstream":313,"tunnel-agent":318,"url":190,"util":192,"zlib":22}],320:[function(require,module,exports){
+},{"./lib/auth":205,"./lib/cookies":206,"./lib/copy":207,"./lib/getProxyFromURI":208,"./lib/helpers":209,"./lib/oauth":210,"_process":172,"aws-sign2":211,"bl":212,"buffer":23,"caseless":221,"combined-stream":222,"forever-agent":224,"form-data":225,"hawk":227,"http":164,"http-signature":228,"https":168,"isstream":243,"mime-types":245,"net":8,"node-uuid":248,"qs":250,"querystring":176,"stream":188,"stringstream":255,"tunnel-agent":260,"url":190,"util":192,"zlib":22}],262:[function(require,module,exports){
 //     Underscore.js 1.5.2
 //     http://underscorejs.org
 //     (c) 2009-2013 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors

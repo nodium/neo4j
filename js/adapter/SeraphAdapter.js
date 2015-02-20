@@ -18,7 +18,6 @@
 const
     seraph            = require('seraph'),
     _                 = require('lodash');
-    request           = require('request');
 
 module.exports = function (Nodium, undefined) {
 
@@ -62,10 +61,6 @@ module.exports = function (Nodium, undefined) {
         createEdge: function (edge) {
 
             var payload = this.edgeTransformer.to(edge);
-
-            console.log('CREATING EDGE');
-            console.log(edge);
-            console.log(payload);
 
             return this
                 .wrapPromise(this.db.relate)(
