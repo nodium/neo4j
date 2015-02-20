@@ -30,7 +30,7 @@ module.exports = function (Nodium, undefined) {
 
     var api         = Nodium.api,
         _defaults   = {
-            host: '127.0.0.1',
+            host: 'localhost',
             port: 7474
         };
 
@@ -84,9 +84,13 @@ module.exports = function (Nodium, undefined) {
 
             var payload = this.nodeTransformer.to(node);
 
+            console.log(payload);
+
             return this
                 .wrapPromise(this.db.save)(payload)
                 .then(function (seraphNode) {
+                    console.log('SERAPH RES');
+                    console.log(seraphNode);
                     node._data = seraphNode;
                     return node;
                 });
@@ -217,7 +221,7 @@ module.exports = function (Nodium, undefined) {
 
                 return new Promise(function (resolve, reject) {
 
-                    var curried = _.partialRight(fn, function (err, result) {
+                    _.partialRight(fn, function (err, result) {
                         if (err) {
                             reject(err);
                         } else {
@@ -248,9 +252,6 @@ module.exports = function (Nodium, undefined) {
         if (path) {
             url += path;
         }
-
-        console.log('connecting to...');
-        console.log(url);
 
         return url;
     }
@@ -295,9 +296,6 @@ module.exports = function (Nodium, undefined) {
 
         headers = headers || {};
 
-        console.log(url);
-        console.log(method);
-
         return new Promise (function (resolve, reject) {
             var request = new XMLHttpRequest(),
                 requestBody;
@@ -308,13 +306,20 @@ module.exports = function (Nodium, undefined) {
             // rejects the Promise otherwise
             request.onload = function () {
 
-                if (200 === request.status) {
+                if (request.status > 199 && request.status < 300) {
+
+                    var body = parseJSON(request.response),
+                        self;
+
+                    if (body) {
+                        self = body.self;
+                    }
 
                     resolve({
                         statusCode: request.status,
-                        body: JSON.parse(request.response),
+                        body: body,
                         headers: {
-                            location: url
+                            location: self
                         }
                     });
 
@@ -364,6 +369,18 @@ module.exports = function (Nodium, undefined) {
     function setHeader (value, key) {
 
         this.setRequestHeader(key, value);
+    }
+
+    function parseJSON (body) {
+        if (body === '') {
+            body = null;
+        } else if (typeof body === 'string') {
+            try {
+                body = JSON.parse(body);
+            } catch (e) {}
+        }
+
+        return body
     }
 
     return api.SeraphAdapter;

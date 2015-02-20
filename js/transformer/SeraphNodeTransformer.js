@@ -38,7 +38,7 @@ module.exports = function (Nodium, undefined) {
             var parsedData = this.splitProperties(seraphNode, this.options.map);
 
             return new Node(
-                _.uniqueId(),            // this adapter always uses a unique id
+                null,                    // this adapter always uses a unique id
                 parsedData.properties,   // the public properties
                 parsedData.mapped,       // the private properties
                 [],                      // labels will be added later

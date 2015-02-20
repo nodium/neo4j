@@ -160,6 +160,8 @@ module.exports = function (Nodium, undefined) {
          */
         handleNodeCreated: function (event, node, data) {
 
+            console.log('API NODE CREATED');
+
             this.createNode(data);
         },
 
