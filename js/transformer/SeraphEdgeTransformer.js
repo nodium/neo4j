@@ -53,12 +53,35 @@ module.exports = function (Nodium, undefined) {
 
         to: function (nodiumEdge) {
 
+            // find the start and end points
+            // these can be in two possible places:
+            // the node _data and the edge _data
+            var id,
+                start,
+                end;
+
+            if (nodiumEdge.hasOwnProperty('_data')) {
+                id = nodiumEdge._data.id;
+                start = nodiumEdge._data.start;
+                end = nodiumEdge._data.end;
+            }
+
+            // try the node _data if we didn't find anything
+            if (start === undefined || start === null) {
+                start = nodiumEdge.source._data.id;
+                end = nodiumEdge.target._data.id;
+            }
+
             var edge = {
-                end: nodiumEdge._data.end,
-                id: nodiumEdge._data.id,
+                end:        end,
                 properties: nodiumEdge._properties || {},
-                start: nodiumEdge._data.start
+                start:      start,
+                type:       nodiumEdge.type
             };
+
+            if (id !== 0 && id) {
+                edge.id = id;
+            }
 
             return edge;
         }

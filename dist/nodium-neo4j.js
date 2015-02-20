@@ -88,6 +88,10 @@ module.exports = function (Nodium, undefined) {
 
             var payload = this.edgeTransformer.to(edge);
 
+            console.log('CREATING EDGE');
+            console.log(edge);
+            console.log(payload);
+
             return this
                 .wrapPromise(this.db.relate)(
                     payload.start,
@@ -484,7 +488,11 @@ module.exports = function (Nodium, undefined) {
          */
         createNode: function (nodeData) {
 
-            return this.adapter.createNode(nodeData);
+            console.log('API CREATE');
+            console.log(nodeData);
+
+            return this.adapter.createNode(nodeData)
+                .then(this.updateNodeLabels.bind(this));
         },
 
         /**
@@ -573,8 +581,6 @@ module.exports = function (Nodium, undefined) {
          * @param {Object} data
          */
         handleNodeCreated: function (event, node, data) {
-
-            console.log('API NODE CREATED');
 
             this.createNode(data);
         },
@@ -900,12 +906,35 @@ module.exports = function (Nodium, undefined) {
 
         to: function (nodiumEdge) {
 
+            // find the start and end points
+            // these can be in two possible places:
+            // the node _data and the edge _data
+            var id,
+                start,
+                end;
+
+            if (nodiumEdge.hasOwnProperty('_data')) {
+                id = nodiumEdge._data.id;
+                start = nodiumEdge._data.start;
+                end = nodiumEdge._data.end;
+            }
+
+            // try the node _data if we didn't find anything
+            if (start === undefined || start === null) {
+                start = nodiumEdge.source._data.id;
+                end = nodiumEdge.target._data.id;
+            }
+
             var edge = {
-                end: nodiumEdge._data.end,
-                id: nodiumEdge._data.id,
+                end:        end,
                 properties: nodiumEdge._properties || {},
-                start: nodiumEdge._data.start
+                start:      start,
+                type:       nodiumEdge.type
             };
+
+            if (id !== 0 && id) {
+                edge.id = id;
+            }
 
             return edge;
         }

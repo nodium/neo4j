@@ -63,6 +63,10 @@ module.exports = function (Nodium, undefined) {
 
             var payload = this.edgeTransformer.to(edge);
 
+            console.log('CREATING EDGE');
+            console.log(edge);
+            console.log(payload);
+
             return this
                 .wrapPromise(this.db.relate)(
                     payload.start,

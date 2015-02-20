@@ -70,7 +70,11 @@ module.exports = function (Nodium, undefined) {
          */
         createNode: function (nodeData) {
 
-            return this.adapter.createNode(nodeData);
+            console.log('API CREATE');
+            console.log(nodeData);
+
+            return this.adapter.createNode(nodeData)
+                .then(this.updateNodeLabels.bind(this));
         },
 
         /**
@@ -159,8 +163,6 @@ module.exports = function (Nodium, undefined) {
          * @param {Object} data
          */
         handleNodeCreated: function (event, node, data) {
-
-            console.log('API NODE CREATED');
 
             this.createNode(data);
         },
